@@ -1,0 +1,108 @@
+mod top_level;
+mod type_decl;
+mod member;
+mod ty;
+mod stmt;
+mod expr;
+
+pub(crate) use javac_ast::JavaSyntaxKind;
+use javac_lexer::Lexer;
+use rowan::GreenNodeBuilder;
+
+pub struct Parse {
+    pub green_node: rowan::GreenNode,
+    pub errors: Vec<ParseError>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParseError {
+    pub message: String,
+    pub offset: usize,
+}
+
+pub(crate) struct Token {
+    pub(crate) kind: JavaSyntaxKind,
+    pub(crate) text: String,
+    pub(crate) offset: usize,
+}
+
+pub struct Parser {
+    pub(crate) tokens: Vec<Token>,
+    pub(crate) pos: usize,
+    pub(crate) builder: GreenNodeBuilder<'static>,
+    pub(crate) errors: Vec<ParseError>,
+}
+
+impl Parser {
+    pub fn parse(source: &str) -> Parse {
+        let lexer = Lexer::new(source);
+        let tokens: Vec<_> = lexer
+            .map(|t| Token {
+                kind: t.kind,
+                text: t.text,
+                offset: u32::from(t.range.start()) as usize,
+            })
+            .collect();
+
+        let mut parser = Parser {
+            tokens,
+            pos: 0,
+            builder: GreenNodeBuilder::new(),
+            errors: Vec::new(),
+        };
+
+        parser.compilation_unit();
+        let green_node = parser.builder.finish();
+
+        Parse {
+            green_node,
+            errors: parser.errors,
+        }
+    }
+
+    pub(crate) fn node(&mut self, kind: JavaSyntaxKind, f: impl FnOnce(&mut Parser)) {
+        self.builder.start_node(kind.into());
+        f(self);
+        self.builder.finish_node();
+    }
+
+    pub(crate) fn kind(&self) -> JavaSyntaxKind {
+        self.tokens.get(self.pos).map(|t| t.kind).unwrap_or(JavaSyntaxKind::Error)
+    }
+
+    pub(crate) fn look(&self, ahead: usize) -> JavaSyntaxKind {
+        self.tokens.get(self.pos + ahead).map(|t| t.kind).unwrap_or(JavaSyntaxKind::Error)
+    }
+
+    pub(crate) fn at(&self, k: JavaSyntaxKind) -> bool { self.kind() == k }
+
+    pub(crate) fn at_any(&self, ks: &[JavaSyntaxKind]) -> bool { ks.contains(&self.kind()) }
+
+    pub(crate) fn bump(&mut self) {
+        if self.pos < self.tokens.len() {
+            let tok = &self.tokens[self.pos];
+            self.builder.token(tok.kind.into(), tok.text.as_str());
+            self.pos += 1;
+        }
+    }
+
+    pub(crate) fn expect(&mut self, k: JavaSyntaxKind) {
+        if self.at(k) { self.bump(); } else {
+            self.err(format!("expected {:?}, got {:?}", k, self.kind()));
+        }
+    }
+
+    pub(crate) fn eat(&mut self, k: JavaSyntaxKind) -> bool {
+        if self.at(k) { self.bump(); true } else { false }
+    }
+
+    pub(crate) fn err(&mut self, msg: impl Into<String>) {
+        let off = self.tokens.get(self.pos).map(|t| t.offset).unwrap_or(0);
+        self.errors.push(ParseError { message: msg.into(), offset: off });
+    }
+
+    pub(crate) fn err_and_bump(&mut self, msg: impl Into<String>) {
+        self.err(msg);
+        self.bump();
+    }
+}
