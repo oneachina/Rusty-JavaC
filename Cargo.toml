@@ -16,6 +16,10 @@ resolver = "3"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+repository = "https://github.com/Eatgrapes/Rusty-JavaC"
+keywords = ["java","recode","Compiler","ByteCode"]
+categories = ["compilers"]
+authors = ["Eatgrapes"]
 rust-version = "1.85"
 
 [workspace.dependencies]
