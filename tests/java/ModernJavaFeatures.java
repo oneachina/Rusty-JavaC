@@ -1,7 +1,7 @@
 import java.util.List;
 import java.util.function.Function;
 
-public class Java21Features {
+public class ModernJavaFeatures {
     String switchExpr(int n) {
         return switch (n) {
             case 1 -> "one";
