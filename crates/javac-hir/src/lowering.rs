@@ -2,6 +2,7 @@ mod error;
 mod expr;
 mod member;
 mod modifiers;
+mod signature;
 mod stmt;
 mod syntax;
 mod types;

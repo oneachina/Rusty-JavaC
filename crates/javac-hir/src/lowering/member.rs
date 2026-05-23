@@ -1,16 +1,21 @@
 use crate::hir::*;
 use crate::lowering::expr::BodyBuilder;
 use crate::lowering::modifiers::{access_flags, has_code};
+use crate::lowering::signature::{lower_type_params, method_signature};
 use crate::lowering::stmt::lower_block;
-use crate::lowering::syntax::last_ident;
-use crate::lowering::types::lower_type;
+use crate::lowering::syntax::{last_ident, source_line};
+use crate::lowering::types::lower_type_with_vars;
 use crate::lowering::{LowerError, LowerResult};
 use javac_ast::ast::{AstNode, ClassBody, MethodDecl as AstMethodDecl};
 use javac_ast::{JavaSyntaxKind, JavaSyntaxNode};
 use javac_ty::{MethodSig, Ty};
+use std::collections::HashSet;
 use ustr::Ustr;
 
-pub(super) fn lower_class_methods(body: ClassBody) -> LowerResult<Vec<MethodDecl>> {
+pub(super) fn lower_class_methods(
+    body: ClassBody,
+    class_type_params: &[javac_ty::TypeParam],
+) -> LowerResult<Vec<MethodDecl>> {
     let mut pending_flags = 0;
     let mut methods = Vec::new();
 
@@ -24,6 +29,7 @@ pub(super) fn lower_class_methods(body: ClassBody) -> LowerResult<Vec<MethodDecl
                     method,
                     pending_flags,
                     methods.len() as u32,
+                    class_type_params,
                 )?);
                 pending_flags = 0;
             }
@@ -44,19 +50,25 @@ fn lower_method_decl(
     method: AstMethodDecl,
     access_flags: u16,
     method_index: u32,
+    class_type_params: &[javac_ty::TypeParam],
 ) -> LowerResult<MethodDecl> {
     let name = method.name().ok_or(LowerError::MissingMethodName)?;
+    let method_type_params = lower_type_params(method.syntax())?;
+    let type_vars = type_var_set(class_type_params, &method_type_params);
     let return_type = method
         .return_type()
-        .map(|ty| lower_type(ty.syntax()))
+        .map(|ty| lower_type_with_vars(ty.syntax(), &type_vars))
         .transpose()?
         .unwrap_or(Ty::Void);
-    let params = lower_method_params(method.syntax())?;
-    let signature = MethodSig::new(
+    let params = lower_method_params(method.syntax(), &type_vars)?;
+    let generic_signature =
+        method_signature(method.syntax(), class_type_params, &method_type_params)?;
+    let mut signature = MethodSig::new(
         Ustr::from(name.text()),
         params.iter().map(|param| param.ty.clone()).collect(),
         return_type,
     );
+    signature.type_params = method_type_params;
     let mut body_builder = BodyBuilder::default();
     define_params(&mut body_builder, &params);
     let root_block = lower_method_body(access_flags, &method, &mut body_builder)?;
@@ -67,12 +79,17 @@ fn lower_method_decl(
         params,
         signature,
         access_flags,
+        source_line: Some(source_line(method.syntax())),
+        generic_signature,
         body: body_builder.body,
         root_block,
     })
 }
 
-fn lower_method_params(method: &JavaSyntaxNode) -> LowerResult<Vec<ParamDecl>> {
+fn lower_method_params(
+    method: &JavaSyntaxNode,
+    type_vars: &HashSet<Ustr>,
+) -> LowerResult<Vec<ParamDecl>> {
     let Some(params) = method
         .children()
         .find(|child| child.kind() == JavaSyntaxKind::FormalParamList)
@@ -91,9 +108,20 @@ fn lower_method_params(method: &JavaSyntaxNode) -> LowerResult<Vec<ParamDecl>> {
             let name = last_ident(&param).ok_or(LowerError::MissingMethodName)?;
             Ok(ParamDecl {
                 name: Ustr::from(name.text()),
-                ty: lower_type(&ty)?,
+                ty: lower_type_with_vars(&ty, type_vars)?,
             })
         })
+        .collect()
+}
+
+fn type_var_set(
+    class_type_params: &[javac_ty::TypeParam],
+    method_type_params: &[javac_ty::TypeParam],
+) -> HashSet<Ustr> {
+    class_type_params
+        .iter()
+        .chain(method_type_params)
+        .map(|param| param.name)
         .collect()
 }
 

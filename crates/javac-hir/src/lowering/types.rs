@@ -1,10 +1,23 @@
 use crate::lowering::{LowerError, LowerResult};
 use javac_ast::{JavaSyntaxKind, JavaSyntaxNode, JavaSyntaxToken};
 use javac_ty::Ty;
+use std::collections::HashSet;
 use ustr::Ustr;
 
 pub(super) fn lower_type(node: &JavaSyntaxNode) -> LowerResult<Ty> {
+    lower_type_with_vars(node, &HashSet::new())
+}
+
+pub(super) fn lower_type_with_vars(
+    node: &JavaSyntaxNode,
+    type_vars: &HashSet<Ustr>,
+) -> LowerResult<Ty> {
     let mut base = lower_base_type(node)?;
+    if let Ty::Class(name) = &base
+        && type_vars.contains(name)
+    {
+        base = Ty::TypeVar(*name);
+    }
     for _ in 0..array_dimensions(node) {
         base = Ty::Array(Box::new(base));
     }

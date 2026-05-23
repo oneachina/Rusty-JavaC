@@ -1,5 +1,6 @@
 use javac_ty::{MethodSig, Ty, TypeParam};
 use la_arena::{Arena, Idx};
+use std::collections::HashMap;
 use std::rc::Rc;
 use ustr::Ustr;
 
@@ -37,6 +38,7 @@ pub struct TypeDecl {
     pub super_class: Option<Ty>,
     pub interfaces: Vec<Ty>,
     pub type_params: Vec<TypeParam>,
+    pub generic_signature: Option<String>,
     pub fields: Vec<FieldDecl>,
     pub methods: Vec<MethodDecl>,
     pub inner_types: Vec<Rc<TypeDecl>>,
@@ -55,6 +57,7 @@ pub enum TypeDeclKind {
 pub struct Body {
     pub exprs: Arena<Expr>,
     pub stmts: Arena<Stmt>,
+    pub stmt_lines: HashMap<StmtId, u16>,
 }
 
 #[derive(Debug, Clone)]
@@ -63,6 +66,7 @@ pub struct FieldDecl {
     pub name: Ustr,
     pub ty: Ty,
     pub access_flags: u16,
+    pub generic_signature: Option<String>,
     pub body: Body,
     pub initializer: Option<ExprId>,
 }
@@ -74,6 +78,8 @@ pub struct MethodDecl {
     pub params: Vec<ParamDecl>,
     pub signature: MethodSig,
     pub access_flags: u16,
+    pub source_line: Option<u16>,
+    pub generic_signature: Option<String>,
     pub body: Body,
     pub root_block: Option<Block>,
 }

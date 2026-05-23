@@ -10,7 +10,7 @@ use ustr::Ustr;
 #[derive(Default)]
 pub(super) struct BodyBuilder {
     pub body: Body,
-    local_types: HashMap<Ustr, Ty>,
+    local_scopes: Vec<HashMap<Ustr, Ty>>,
 }
 
 impl BodyBuilder {
@@ -18,8 +18,34 @@ impl BodyBuilder {
         self.body.stmts.alloc(stmt)
     }
 
+    pub(super) fn alloc_stmt_at(&mut self, stmt: Stmt, line: u16) -> StmtId {
+        let stmt_id = self.alloc_stmt(stmt);
+        self.body.stmt_lines.insert(stmt_id, line);
+        stmt_id
+    }
+
+    pub(super) fn enter_scope(&mut self) {
+        self.local_scopes.push(HashMap::new());
+    }
+
+    pub(super) fn exit_scope(&mut self) {
+        self.local_scopes.pop();
+    }
+
     pub(super) fn define_local(&mut self, name: Ustr, ty: Ty) {
-        self.local_types.insert(name, ty);
+        if self.local_scopes.is_empty() {
+            self.enter_scope();
+        }
+        if let Some(scope) = self.local_scopes.last_mut() {
+            scope.insert(name, ty);
+        }
+    }
+
+    pub(super) fn local_ty(&self, name: Ustr) -> Option<Ty> {
+        self.local_scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(&name).cloned())
     }
 
     pub(super) fn lower_expr_tokens(
@@ -51,7 +77,7 @@ impl BodyBuilder {
             Expr::BoolLiteral(_) => Ty::Boolean,
             Expr::CharLiteral(_) => Ty::Char,
             Expr::StringLiteral(_) => Ty::Class(Ustr::from("java/lang/String")),
-            Expr::Ident(name) => self.local_types.get(name).cloned().unwrap_or(Ty::Int),
+            Expr::Ident(name) => self.local_ty(*name).unwrap_or(Ty::Int),
             Expr::Binary { op, left, right } => {
                 let left_ty = self.expr_ty(*left);
                 let right_ty = self.expr_ty(*right);
@@ -67,7 +93,7 @@ impl BodyBuilder {
                     BinaryOp::Add if is_string_ty(&left_ty) || is_string_ty(&right_ty) => {
                         Ty::Class(Ustr::from("java/lang/String"))
                     }
-                    _ => left_ty,
+                    _ => numeric_result_ty(&left_ty, &right_ty),
                 }
             }
             Expr::Instanceof { .. } => Ty::Boolean,
@@ -79,6 +105,18 @@ impl BodyBuilder {
 
     pub(super) fn alloc_expr(&mut self, expr: Expr) -> ExprId {
         self.body.exprs.alloc(expr)
+    }
+}
+
+fn numeric_result_ty(left: &Ty, right: &Ty) -> Ty {
+    if left == &Ty::Double || right == &Ty::Double {
+        Ty::Double
+    } else if left == &Ty::Float || right == &Ty::Float {
+        Ty::Float
+    } else if left == &Ty::Long || right == &Ty::Long {
+        Ty::Long
+    } else {
+        Ty::Int
     }
 }
 

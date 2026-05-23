@@ -22,6 +22,19 @@ pub(super) fn first_ident(node: &JavaSyntaxNode) -> Option<JavaSyntaxToken> {
         .find(|token| token.kind() == JavaSyntaxKind::Ident)
 }
 
+pub(super) fn source_line(node: &JavaSyntaxNode) -> u16 {
+    let root = node.ancestors().last().unwrap_or_else(|| node.clone());
+    let text = root.text().to_string();
+    let start = u32::from(node.text_range().start()) as usize;
+    let offset = start.min(text.len());
+    let line = text.as_bytes()[..offset]
+        .iter()
+        .filter(|byte| **byte == b'\n')
+        .count()
+        + 1;
+    line.min(u16::MAX as usize) as u16
+}
+
 pub(super) fn last_ident(node: &JavaSyntaxNode) -> Option<JavaSyntaxToken> {
     node.children_with_tokens()
         .filter_map(|element| element.into_token())
