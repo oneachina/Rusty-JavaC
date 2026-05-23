@@ -7,10 +7,12 @@ on:
     paths:
       - "**/*.rs"
       - "**/*.toml"
+      - "**/*.java"
   pull_request:
     paths:
       - "**/*.rs"
       - "**/*.toml"
+      - "**/*.java"
   workflow_dispatch:
 
 env:
