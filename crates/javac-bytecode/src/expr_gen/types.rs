@@ -2,7 +2,6 @@ use crate::codegen::CodegenCtx;
 use crate::expr_gen::{calls, is_string, values};
 use javac_hir::hir::*;
 use javac_ty::Ty;
-use ustr::Ustr;
 
 pub(crate) fn expr_ty(ctx: &CodegenCtx, body: &Body, expr_id: ExprId) -> Ty {
     match &body.exprs[expr_id] {
@@ -11,7 +10,7 @@ pub(crate) fn expr_ty(ctx: &CodegenCtx, body: &Body, expr_id: ExprId) -> Ty {
             .or_else(|| ctx.field_ty(*name))
             .unwrap_or(Ty::Int),
         Expr::FieldAccess { target, field } => {
-            if let Some(field_ref) = calls::static_field_ref(body, *target, *field) {
+            if let Some(field_ref) = calls::static_field_ref(ctx, body, *target, *field) {
                 field_ref.ty
             } else if values::is_current_instance(body, *target) {
                 ctx.field_ty(*field).unwrap_or(Ty::Int)
@@ -38,7 +37,7 @@ pub(crate) fn expr_ty(ctx: &CodegenCtx, body: &Body, expr_id: ExprId) -> Ty {
                 if is_string(&expr_ty(ctx, body, *left))
                     || is_string(&expr_ty(ctx, body, *right)) =>
             {
-                Ty::Class(Ustr::from("java/lang/String"))
+                Ty::string()
             }
             _ => expr_ty(ctx, body, *left),
         },

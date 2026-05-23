@@ -20,6 +20,22 @@ pub enum Ty {
 }
 
 impl Ty {
+    pub fn object() -> Self {
+        Ty::Class(Ustr::from("java/lang/Object"))
+    }
+
+    pub fn string() -> Self {
+        Ty::Class(Ustr::from("java/lang/String"))
+    }
+
+    pub fn class(internal_name: impl AsRef<str>) -> Self {
+        Ty::Class(Ustr::from(internal_name.as_ref()))
+    }
+
+    pub fn is_string(&self) -> bool {
+        matches!(self.erasure(), Ty::Class(name) if name.as_str() == "java/lang/String")
+    }
+
     pub fn descriptor(&self) -> String {
         match self {
             Ty::Void => "V".to_string(),
@@ -41,13 +57,13 @@ impl Ty {
 
     pub fn erasure(&self) -> Ty {
         match self {
-            Ty::TypeVar(_) => Ty::Class(Ustr::from("java/lang/Object")),
+            Ty::TypeVar(_) => Ty::object(),
             Ty::Wildcard(Some(bound)) => bound.erasure(),
-            Ty::Wildcard(None) => Ty::Class(Ustr::from("java/lang/Object")),
+            Ty::Wildcard(None) => Ty::object(),
             Ty::Intersection(types) => types
                 .first()
                 .map(|t| t.erasure())
-                .unwrap_or(Ty::Class(Ustr::from("java/lang/Object"))),
+                .unwrap_or_else(Ty::object),
             other => other.clone(),
         }
     }

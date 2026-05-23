@@ -1,5 +1,6 @@
 use crate::codegen::CodegenCtx;
 use crate::error::BytecodeError;
+use javac_call_resolver::ClassCatalog;
 use javac_classfile::ClassFileWriter;
 use javac_hir::hir::*;
 use javac_ty::Ty;
@@ -10,18 +11,26 @@ const OBJECT_CLASS: &str = "java/lang/Object";
 const INIT_METHOD: &str = "<init>";
 
 pub fn gen_class(unit: &CompilationUnit) -> Result<Vec<u8>, BytecodeError> {
+    let catalog = ClassCatalog::platform();
+    gen_class_with_catalog(unit, &catalog)
+}
+
+pub fn gen_class_with_catalog(
+    unit: &CompilationUnit,
+    catalog: &ClassCatalog,
+) -> Result<Vec<u8>, BytecodeError> {
     let type_decl = unit
         .type_decls
         .first()
         .ok_or_else(|| BytecodeError::new("no type declarations"))?;
-    crate::validation::validate_type_decl(type_decl)?;
+    crate::validation::validate_type_decl(type_decl, catalog)?;
 
     let mut writer = ClassFileWriter::new();
-    gen_type_decl(&mut writer, type_decl);
+    gen_type_decl(&mut writer, type_decl, catalog);
     writer.to_bytes().map_err(BytecodeError::new)
 }
 
-fn gen_type_decl(writer: &mut ClassFileWriter, type_decl: &TypeDecl) {
+fn gen_type_decl(writer: &mut ClassFileWriter, type_decl: &TypeDecl, catalog: &ClassCatalog) {
     let access_flags = class_access_flags(type_decl);
     let super_name = super_name(type_decl);
     let interfaces = interface_names(type_decl);
@@ -40,9 +49,9 @@ fn gen_type_decl(writer: &mut ClassFileWriter, type_decl: &TypeDecl) {
 
     gen_fields(writer, &type_decl.fields);
     if needs_default_constructor(type_decl) {
-        gen_default_constructor(writer, type_decl, &super_name);
+        gen_default_constructor(writer, type_decl, &super_name, catalog);
     }
-    gen_methods(writer, type_decl, &super_name);
+    gen_methods(writer, type_decl, &super_name, catalog);
 }
 
 fn gen_fields(writer: &mut ClassFileWriter, fields: &[FieldDecl]) {
@@ -56,9 +65,14 @@ fn gen_fields(writer: &mut ClassFileWriter, fields: &[FieldDecl]) {
     }
 }
 
-fn gen_methods(writer: &mut ClassFileWriter, type_decl: &TypeDecl, super_name: &str) {
+fn gen_methods(
+    writer: &mut ClassFileWriter,
+    type_decl: &TypeDecl,
+    super_name: &str,
+    catalog: &ClassCatalog,
+) {
     for method in &type_decl.methods {
-        gen_method(writer, type_decl, method, super_name);
+        gen_method(writer, type_decl, method, super_name, catalog);
     }
 }
 
@@ -67,6 +81,7 @@ fn gen_method(
     type_decl: &TypeDecl,
     method: &MethodDecl,
     super_name: &str,
+    catalog: &ClassCatalog,
 ) {
     let descriptor = method.signature.descriptor();
     let mut mw = writer.visit_method(method.access_flags, &method.name, &descriptor);
@@ -81,7 +96,7 @@ fn gen_method(
         && let Some(block) = &method.root_block
     {
         mw.visit_code();
-        let mut ctx = CodegenCtx::new(writer, type_decl.name.clone());
+        let mut ctx = CodegenCtx::new(writer, type_decl.name.clone(), catalog);
         ctx.set_super_name(ustr::Ustr::from(super_name));
         ctx.set_fields(&type_decl.fields);
         ctx.set_methods(&type_decl.methods);
@@ -170,10 +185,15 @@ fn needs_default_constructor(type_decl: &TypeDecl) -> bool {
             .any(|method| method.name == INIT_METHOD)
 }
 
-fn gen_default_constructor(writer: &mut ClassFileWriter, type_decl: &TypeDecl, super_name: &str) {
+fn gen_default_constructor(
+    writer: &mut ClassFileWriter,
+    type_decl: &TypeDecl,
+    super_name: &str,
+    catalog: &ClassCatalog,
+) {
     let mut mw = writer.visit_method(javac_classfile::ACC_PUBLIC, INIT_METHOD, "()V");
     mw.visit_code();
-    let mut ctx = CodegenCtx::new(writer, type_decl.name.clone());
+    let mut ctx = CodegenCtx::new(writer, type_decl.name.clone(), catalog);
     ctx.set_super_name(ustr::Ustr::from(super_name));
     ctx.set_fields(&type_decl.fields);
     ctx.set_methods(&type_decl.methods);

@@ -3,6 +3,7 @@ mod scope;
 
 use crate::error::BytecodeError;
 use diagnostic::{display_internal_name, unresolved_field, unresolved_method, unresolved_variable};
+use javac_call_resolver::ClassCatalog;
 use javac_hir::hir::*;
 use javac_ty::{MethodSig, Ty};
 use scope::MethodScope;
@@ -11,8 +12,11 @@ use ustr::Ustr;
 
 type ValidateResult<T> = Result<T, BytecodeError>;
 
-pub(crate) fn validate_type_decl(type_decl: &TypeDecl) -> ValidateResult<()> {
-    let validator = Validator::new(type_decl);
+pub(crate) fn validate_type_decl(
+    type_decl: &TypeDecl,
+    catalog: &ClassCatalog,
+) -> ValidateResult<()> {
+    let validator = Validator::new(type_decl, catalog);
 
     for field in &type_decl.fields {
         validator.validate_field(field)?;
@@ -25,6 +29,7 @@ pub(crate) fn validate_type_decl(type_decl: &TypeDecl) -> ValidateResult<()> {
 }
 
 struct Validator {
+    catalog: ClassCatalog,
     class_name: Ustr,
     fields: HashMap<Ustr, FieldInfo>,
     methods: HashMap<Ustr, MethodSig>,
@@ -36,7 +41,7 @@ struct FieldInfo {
 }
 
 impl Validator {
-    fn new(type_decl: &TypeDecl) -> Self {
+    fn new(type_decl: &TypeDecl, catalog: &ClassCatalog) -> Self {
         let fields = type_decl
             .fields
             .iter()
@@ -60,6 +65,7 @@ impl Validator {
             .collect();
 
         Self {
+            catalog: catalog.clone(),
             class_name: type_decl.name,
             fields,
             methods,
@@ -365,7 +371,11 @@ impl Validator {
         field: Ustr,
     ) -> ValidateResult<()> {
         if let Some(owner) = static_class_name(body, target) {
-            if javac_call_resolver::resolve_static_field(owner, field.as_str()).is_none() {
+            if self
+                .catalog
+                .resolve_static_field(owner, field.as_str())
+                .is_none()
+            {
                 return Err(unresolved_field(
                     field,
                     &display_internal_name(owner),
@@ -404,7 +414,9 @@ impl Validator {
 
         if let Some(target) = target {
             let receiver = self.expr_ty(body, scope, target);
-            if javac_call_resolver::resolve_instance_method(&receiver, method.as_str(), &arg_types)
+            if self
+                .catalog
+                .resolve_instance_method(&receiver, method.as_str(), &arg_types)
                 .is_some()
             {
                 return Ok(());
@@ -461,7 +473,7 @@ impl Validator {
             Expr::FieldAccess { target, field } => {
                 if let Some(owner) = static_class_name(body, *target)
                     && let Some(field_ref) =
-                        javac_call_resolver::resolve_static_field(owner, field.as_str())
+                        self.catalog.resolve_static_field(owner, field.as_str())
                 {
                     return field_ref.ty;
                 }
@@ -483,11 +495,10 @@ impl Validator {
                     .collect::<Vec<_>>();
                 if let Some(target) = target {
                     let receiver = self.expr_ty(body, scope, *target);
-                    if let Some(method_ref) = javac_call_resolver::resolve_instance_method(
-                        &receiver,
-                        method.as_str(),
-                        &arg_types,
-                    ) {
+                    if let Some(method_ref) =
+                        self.catalog
+                            .resolve_instance_method(&receiver, method.as_str(), &arg_types)
+                    {
                         return method_ref.return_ty;
                     }
                 }
@@ -509,7 +520,7 @@ impl Validator {
                     if is_string(&self.expr_ty(body, scope, *left))
                         || is_string(&self.expr_ty(body, scope, *right)) =>
                 {
-                    Ty::Class(Ustr::from("java/lang/String"))
+                    Ty::string()
                 }
                 _ => self.expr_ty(body, scope, *left),
             },
@@ -563,5 +574,5 @@ fn pattern_binding(body: &Body, expr_id: ExprId) -> Option<(Ustr, Ty)> {
 }
 
 fn is_string(ty: &Ty) -> bool {
-    matches!(ty.erasure(), Ty::Class(name) if name.as_str() == "java/lang/String")
+    ty.is_string()
 }

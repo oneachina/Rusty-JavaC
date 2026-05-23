@@ -141,7 +141,7 @@ pub(crate) fn gen_expr_for_effect(
 }
 
 pub(crate) fn is_string(ty: &Ty) -> bool {
-    matches!(ty.erasure(), Ty::Class(name) if name.as_str() == "java/lang/String")
+    ty.is_string()
 }
 
 fn emit_ternary(

@@ -107,10 +107,28 @@ impl BodyBuilder {
             Expr::DoubleLiteral(_) => Ty::Double,
             Expr::BoolLiteral(_) => Ty::Boolean,
             Expr::CharLiteral(_) => Ty::Char,
-            Expr::StringLiteral(_) => Ty::Class(Ustr::from("java/lang/String")),
-            Expr::NullLiteral => Ty::Class(Ustr::from("java/lang/Object")),
-            Expr::This | Expr::Super => Ty::Class(Ustr::from("java/lang/Object")),
+            Expr::StringLiteral(_) => Ty::string(),
+            Expr::NullLiteral => Ty::object(),
+            Expr::This | Expr::Super => Ty::object(),
             Expr::Ident(name) => self.local_ty(*name).unwrap_or(Ty::Int),
+            Expr::FieldAccess { target, field } => {
+                if let Some(owner) = self.static_class_name(*target)
+                    && let Some(field_ref) = self
+                        .type_resolver
+                        .resolve_static_field(owner, field.as_str())
+                {
+                    field_ref.ty
+                } else {
+                    Ty::Int
+                }
+            }
+            Expr::MethodCall {
+                target,
+                method,
+                args,
+            } => self
+                .method_call_ty(*target, *method, args)
+                .unwrap_or(Ty::Int),
             Expr::NewObject { class, .. } => class.clone(),
             Expr::NewArray { element_type, .. } => Ty::Array(Box::new(element_type.clone())),
             Expr::ArrayAccess { array, .. } => match self.expr_ty(*array) {
@@ -130,7 +148,7 @@ impl BodyBuilder {
                     | BinaryOp::Le
                     | BinaryOp::Ge => Ty::Boolean,
                     BinaryOp::Add if is_string_ty(&left_ty) || is_string_ty(&right_ty) => {
-                        Ty::Class(Ustr::from("java/lang/String"))
+                        Ty::string()
                     }
                     _ => numeric_result_ty(&left_ty, &right_ty),
                 }
@@ -155,6 +173,25 @@ impl BodyBuilder {
 
     fn resolve_type_name(&self, name: &str) -> LowerResult<Ty> {
         class_type_from_name(name, 1, &self.type_resolver)
+    }
+
+    fn method_call_ty(&self, target: Option<ExprId>, method: Ustr, args: &[ExprId]) -> Option<Ty> {
+        let target = target?;
+        let receiver = self.expr_ty(target);
+        let arg_types = args
+            .iter()
+            .map(|arg| self.expr_ty(*arg))
+            .collect::<Vec<_>>();
+        self.type_resolver
+            .resolve_instance_method(&receiver, method.as_str(), &arg_types)
+            .map(|method| method.return_ty)
+    }
+
+    fn static_class_name(&self, expr_id: ExprId) -> Option<&'static str> {
+        match &self.body.exprs[expr_id] {
+            Expr::Ident(name) => javac_call_resolver::resolve_class_name(name.as_str()),
+            _ => None,
+        }
     }
 }
 

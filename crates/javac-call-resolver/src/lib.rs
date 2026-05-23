@@ -7,20 +7,23 @@ use javac_ty::Ty;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldRef {
-    pub owner: &'static str,
-    pub name: &'static str,
-    pub descriptor: &'static str,
+    pub owner: String,
+    pub name: String,
+    pub descriptor: String,
     pub ty: Ty,
+    pub access_flags: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MethodRef {
-    pub owner: &'static str,
-    pub name: &'static str,
+    pub owner: String,
+    pub name: String,
     pub descriptor: String,
     pub return_ty: Ty,
+    pub params: Vec<Ty>,
     pub opcode: u8,
     pub is_interface: bool,
+    pub access_flags: u16,
 }
 
 pub fn resolve_class_name(simple_name: &str) -> Option<&'static str> {
@@ -44,9 +47,9 @@ pub fn known_package(package: &str) -> bool {
 }
 
 pub fn resolve_static_field(owner: &str, name: &str) -> Option<FieldRef> {
-    calls::resolve_static_field(owner, name)
+    ClassCatalog::platform().resolve_static_field(owner, name)
 }
 
 pub fn resolve_instance_method(receiver: &Ty, name: &str, args: &[Ty]) -> Option<MethodRef> {
-    calls::resolve_instance_method(receiver, name, args)
+    ClassCatalog::platform().resolve_instance_method(receiver, name, args)
 }

@@ -26,6 +26,8 @@ pub enum LowerError {
     MissingMethodName,
     #[error("type syntax is missing")]
     MissingType,
+    #[error("local variable type inference requires an initializer")]
+    VarRequiresInitializer { line: u16 },
     #[error("cannot find symbol: class `{name}`")]
     UnknownType { name: String, line: u16 },
     #[error("unsupported expression")]

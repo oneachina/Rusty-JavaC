@@ -1,4 +1,6 @@
 use crate::platform;
+use crate::{FieldRef, MethodRef, calls};
+use javac_ty::{MethodSig, Ty};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
@@ -6,6 +8,9 @@ pub struct ClassCatalog {
     classes: HashSet<String>,
     packages: HashSet<String>,
     simple_names: HashMap<String, SimpleName>,
+    fields: HashMap<(String, String), FieldRef>,
+    methods: HashMap<(String, String), Vec<MethodRef>>,
+    interfaces: HashSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -37,6 +42,65 @@ impl ClassCatalog {
         } else {
             self.insert_simple_name(&internal_name, &internal_name);
         }
+    }
+
+    pub fn mark_interface(&mut self, internal_name: impl AsRef<str>) {
+        if let Some(internal_name) = normalize_internal_name(internal_name.as_ref()) {
+            self.interfaces.insert(internal_name);
+        }
+    }
+
+    pub fn insert_field(
+        &mut self,
+        owner: impl AsRef<str>,
+        name: impl AsRef<str>,
+        descriptor: impl AsRef<str>,
+        ty: Ty,
+        access_flags: u16,
+    ) {
+        let owner = owner.as_ref().to_string();
+        let name = name.as_ref().to_string();
+        let descriptor = descriptor.as_ref().to_string();
+        self.fields.insert(
+            (owner.clone(), name.clone()),
+            FieldRef {
+                owner,
+                name,
+                descriptor,
+                ty,
+                access_flags,
+            },
+        );
+    }
+
+    pub fn insert_method(
+        &mut self,
+        owner: impl AsRef<str>,
+        sig: MethodSig,
+        access_flags: u16,
+        is_interface: bool,
+    ) {
+        let owner = owner.as_ref().to_string();
+        let descriptor = sig.descriptor();
+        let opcode = if is_interface {
+            rust_asm::opcodes::INVOKEINTERFACE
+        } else {
+            rust_asm::opcodes::INVOKEVIRTUAL
+        };
+        let method = MethodRef {
+            owner: owner.clone(),
+            name: sig.name.to_string(),
+            descriptor,
+            return_ty: sig.return_type,
+            params: sig.params,
+            opcode,
+            is_interface,
+            access_flags,
+        };
+        self.methods
+            .entry((owner, method.name.clone()))
+            .or_default()
+            .push(method);
     }
 
     pub fn contains_internal_class(&self, internal_name: &str) -> bool {
@@ -73,6 +137,36 @@ impl ClassCatalog {
         }
     }
 
+    pub fn resolve_static_field(&self, owner: &str, name: &str) -> Option<FieldRef> {
+        calls::resolve_static_field(owner, name).or_else(|| {
+            self.fields
+                .get(&(owner.to_string(), name.to_string()))
+                .cloned()
+        })
+    }
+
+    pub fn resolve_instance_method(
+        &self,
+        receiver: &Ty,
+        name: &str,
+        args: &[Ty],
+    ) -> Option<MethodRef> {
+        if let Some(method) = calls::resolve_instance_method(receiver, name, args) {
+            return Some(method);
+        }
+
+        let owner = match receiver.erasure() {
+            Ty::Class(owner) => owner.to_string(),
+            Ty::Array(_) => Ty::object().internal_name(),
+            _ => return None,
+        };
+        let methods = self.methods.get(&(owner, name.to_string()))?;
+        methods
+            .iter()
+            .find(|method| params_match(&method.params, args))
+            .cloned()
+    }
+
     fn insert_simple_name(&mut self, simple_name: &str, internal_name: &str) {
         match self.simple_names.get(simple_name) {
             Some(SimpleName::Unique(existing)) if existing == internal_name => {}
@@ -96,8 +190,19 @@ impl Default for ClassCatalog {
             classes: HashSet::new(),
             packages: HashSet::new(),
             simple_names: HashMap::new(),
+            fields: HashMap::new(),
+            methods: HashMap::new(),
+            interfaces: HashSet::new(),
         }
     }
+}
+
+fn params_match(expected: &[Ty], actual: &[Ty]) -> bool {
+    expected.len() == actual.len()
+        && expected
+            .iter()
+            .zip(actual)
+            .all(|(expected, actual)| expected.erasure() == actual.erasure())
 }
 
 fn normalize_internal_name(name: &str) -> Option<String> {

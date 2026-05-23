@@ -59,7 +59,7 @@ fn compile_source(
 ) -> CompileResult<ClassArtifact> {
     let unit = parse_and_lower(filename, source, catalog)?;
     let internal_name = top_level_class_name(filename, &unit)?;
-    let bytes = javac_bytecode::class_gen::gen_class(&unit)
+    let bytes = javac_bytecode::class_gen::gen_class_with_catalog(&unit, catalog)
         .map_err(|e| render_bytecode_error(filename, source, &e))?;
 
     Ok(ClassArtifact {
@@ -116,6 +116,7 @@ fn lower_error_range(source: &str, error: &LowerError) -> TextRange {
         | LowerError::UnknownType { name, line } => {
             line_range(source, *line as usize, Some(name.as_str()))
         }
+        LowerError::VarRequiresInitializer { line } => line_range(source, *line as usize, None),
         _ => source_start_range(source),
     }
 }
@@ -217,6 +218,7 @@ fn lower_error_label(error: &LowerError) -> &'static str {
         LowerError::MissingClassName => "class name is missing",
         LowerError::MissingMethodName => "name is missing",
         LowerError::MissingType => "type is missing",
+        LowerError::VarRequiresInitializer { .. } => "initializer is missing",
         LowerError::MissingImportName => "import name is missing",
         LowerError::UnknownImport { .. } => "unresolved import",
         LowerError::UnknownType { .. } => "unresolved type",
@@ -238,6 +240,9 @@ fn lower_error_help(error: &LowerError) -> &'static str {
         LowerError::MissingClassName => "add an identifier after the class keyword",
         LowerError::MissingMethodName => "add the missing identifier",
         LowerError::MissingType => "add a valid Java type",
+        LowerError::VarRequiresInitializer { .. } => {
+            "add an initializer or write the explicit type"
+        }
         LowerError::MissingImportName => "add a qualified import name",
         LowerError::UnknownImport { .. } => {
             "check the import spelling or add the class, jar, or source directory with --class-path"

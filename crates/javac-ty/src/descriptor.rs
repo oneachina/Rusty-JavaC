@@ -1,5 +1,6 @@
 use crate::method_sig::MethodSig;
 use crate::ty::Ty;
+use ustr::Ustr;
 
 pub fn field_descriptor(ty: &Ty) -> String {
     ty.erasure().descriptor()
@@ -20,6 +21,24 @@ pub fn descriptor_to_ty(desc: &str) -> Option<Ty> {
     }
     let (ty, _) = parse_type(&chars, 0)?;
     Some(ty)
+}
+
+pub fn method_descriptor_to_sig(name: &str, desc: &str) -> Option<MethodSig> {
+    let chars = desc.chars().collect::<Vec<_>>();
+    if chars.first().copied()? != '(' {
+        return None;
+    }
+
+    let mut params = Vec::new();
+    let mut pos = 1;
+    while chars.get(pos).copied()? != ')' {
+        let (param, next) = parse_type(&chars, pos)?;
+        params.push(param);
+        pos = next;
+    }
+
+    let (return_type, end) = parse_type(&chars, pos + 1)?;
+    (end == chars.len()).then(|| MethodSig::new(Ustr::from(name), params, return_type))
 }
 
 fn parse_type(chars: &[char], pos: usize) -> Option<(Ty, usize)> {

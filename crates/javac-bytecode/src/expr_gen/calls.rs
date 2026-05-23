@@ -1,6 +1,6 @@
 use crate::codegen::CodegenCtx;
 use crate::expr_gen::{expr_ty, gen_expr, values};
-use javac_call_resolver::{self, FieldRef};
+use javac_call_resolver::FieldRef;
 use javac_classfile::MethodWriter;
 use javac_hir::hir::{Body, ExprId};
 use javac_ty::Ty;
@@ -19,12 +19,12 @@ pub(super) fn emit_field_access(
     target: ExprId,
     field: Ustr,
 ) -> bool {
-    if let Some(field_ref) = static_field_ref(body, target, field) {
+    if let Some(field_ref) = static_field_ref(ctx, body, target, field) {
         mw.visit_field_insn(
             opcodes::GETSTATIC,
-            field_ref.owner,
-            field_ref.name,
-            field_ref.descriptor,
+            &field_ref.owner,
+            &field_ref.name,
+            &field_ref.descriptor,
         );
         return true;
     }
@@ -55,7 +55,7 @@ pub(super) fn emit_method_call(
 ) -> bool {
     if let Some(target) = target {
         let arg_types = arg_types(ctx, body, args);
-        if let Some(method_ref) = javac_call_resolver::resolve_instance_method(
+        if let Some(method_ref) = ctx.catalog.resolve_instance_method(
             &expr_ty(ctx, body, target),
             method.as_str(),
             &arg_types,
@@ -66,8 +66,8 @@ pub(super) fn emit_method_call(
             }
             mw.visit_method_insn(
                 method_ref.opcode,
-                method_ref.owner,
-                method_ref.name,
+                &method_ref.owner,
+                &method_ref.name,
                 &method_ref.descriptor,
                 method_ref.is_interface,
             );
@@ -102,7 +102,8 @@ pub(super) fn method_return_ty(
         let receiver = expr_ty(ctx, body, target);
         let args = arg_types(ctx, body, args);
         if let Some(method_ref) =
-            javac_call_resolver::resolve_instance_method(&receiver, method.as_str(), &args)
+            ctx.catalog
+                .resolve_instance_method(&receiver, method.as_str(), &args)
         {
             return Some(method_ref.return_ty);
         }
@@ -111,9 +112,14 @@ pub(super) fn method_return_ty(
     ctx.method_sig(method).map(|sig| sig.return_type)
 }
 
-pub(super) fn static_field_ref(body: &Body, target: ExprId, field: Ustr) -> Option<FieldRef> {
+pub(super) fn static_field_ref(
+    ctx: &CodegenCtx,
+    body: &Body,
+    target: ExprId,
+    field: Ustr,
+) -> Option<FieldRef> {
     let owner = values::static_class_name(body, target)?;
-    javac_call_resolver::resolve_static_field(owner, field.as_str())
+    ctx.catalog.resolve_static_field(owner, field.as_str())
 }
 
 fn emit_current_class_call(

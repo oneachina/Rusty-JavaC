@@ -80,6 +80,23 @@ impl TypeResolver {
         })
     }
 
+    pub fn resolve_instance_method(
+        &self,
+        receiver: &Ty,
+        name: &str,
+        args: &[Ty],
+    ) -> Option<javac_call_resolver::MethodRef> {
+        self.catalog.resolve_instance_method(receiver, name, args)
+    }
+
+    pub fn resolve_static_field(
+        &self,
+        owner: &str,
+        name: &str,
+    ) -> Option<javac_call_resolver::FieldRef> {
+        self.catalog.resolve_static_field(owner, name)
+    }
+
     fn add_import(&mut self, import: &Import) -> LowerResult<()> {
         let line = import.source_line.unwrap_or(1);
         if import.is_static {
@@ -145,7 +162,7 @@ pub(super) fn is_var_type(node: &JavaSyntaxNode) -> bool {
 }
 
 pub(super) fn is_string_ty(ty: &Ty) -> bool {
-    matches!(ty, Ty::Class(name) if name.as_str() == "java/lang/String")
+    ty.is_string()
 }
 
 pub(super) fn class_type_from_name(
@@ -184,7 +201,7 @@ fn lower_base_type(
             let name = type_name_text(node).unwrap_or_else(|| token.text().to_string());
             resolver.resolve_type_name(&name, line, type_vars)?
         }
-        JavaSyntaxKind::VarKw => Ty::Class(Ustr::from("java/lang/Object")),
+        JavaSyntaxKind::VarKw => return Err(LowerError::MissingType),
         _ => return Err(LowerError::MissingType),
     };
     Ok(ty)

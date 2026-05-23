@@ -1,3 +1,4 @@
+use javac_call_resolver::ClassCatalog;
 use javac_classfile::{ClassFileWriter, Label};
 use javac_hir::hir::{FieldDecl, MethodDecl};
 use javac_ty::{MethodSig, Ty};
@@ -12,6 +13,7 @@ pub struct FieldInfo {
 
 pub struct CodegenCtx<'a> {
     pub writer: &'a mut ClassFileWriter,
+    pub catalog: ClassCatalog,
     pub class_name: Ustr,
     pub super_name: Ustr,
     pub return_ty: Ty,
@@ -25,9 +27,10 @@ pub struct CodegenCtx<'a> {
 }
 
 impl<'a> CodegenCtx<'a> {
-    pub fn new(writer: &'a mut ClassFileWriter, class_name: Ustr) -> Self {
+    pub fn new(writer: &'a mut ClassFileWriter, class_name: Ustr, catalog: &ClassCatalog) -> Self {
         Self {
             writer,
+            catalog: catalog.clone(),
             class_name,
             super_name: Ustr::from("java/lang/Object"),
             return_ty: Ty::Void,

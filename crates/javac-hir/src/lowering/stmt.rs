@@ -62,8 +62,12 @@ fn lower_local_var_decl(decl: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerR
         .children()
         .find(|child| child.kind() == JavaSyntaxKind::Type)
         .ok_or(LowerError::MissingType)?;
-    let explicit_ty = body.lower_type(&declared_ty)?;
     let is_var = is_var_type(&declared_ty);
+    let explicit_ty = if is_var {
+        None
+    } else {
+        Some(body.lower_type(&declared_ty)?)
+    };
     let mut stmts = Vec::new();
 
     for declarator in decl
@@ -76,7 +80,13 @@ fn lower_local_var_decl(decl: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerR
         } else {
             None
         };
-        let ty = local_var_type(is_var, &explicit_ty, initializer, body);
+        let ty = local_var_type(
+            is_var,
+            explicit_ty.as_ref(),
+            initializer,
+            body,
+            source_line(&declarator),
+        )?;
         body.define_local(Ustr::from(name.text()), ty.clone());
         stmts.push(body.alloc_stmt_at(
             Stmt::LocalVar(LocalVarDecl {
@@ -93,16 +103,17 @@ fn lower_local_var_decl(decl: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerR
 
 fn local_var_type(
     is_var: bool,
-    explicit_ty: &Ty,
+    explicit_ty: Option<&Ty>,
     initializer: Option<ExprId>,
     body: &BodyBuilder,
-) -> Ty {
+    line: u16,
+) -> LowerResult<Ty> {
     if is_var {
         initializer
             .map(|expr| body.expr_ty(expr))
-            .unwrap_or_else(|| Ty::Class(Ustr::from("java/lang/Object")))
+            .ok_or(LowerError::VarRequiresInitializer { line })
     } else {
-        explicit_ty.clone()
+        explicit_ty.cloned().ok_or(LowerError::MissingType)
     }
 }
 
@@ -420,13 +431,24 @@ fn lower_try_resource(
         .children()
         .find(|child| child.kind() == JavaSyntaxKind::Type)
         .ok_or(LowerError::MissingType)?;
-    let explicit_ty = body.lower_type(&declared_ty)?;
+    let is_var = is_var_type(&declared_ty);
+    let explicit_ty = if is_var {
+        None
+    } else {
+        Some(body.lower_type(&declared_ty)?)
+    };
     let initializer = if let Some(tokens) = initializer_tokens(resource) {
         body.lower_expr_tokens(&tokens)?
     } else {
         None
     };
-    let ty = local_var_type(is_var_type(&declared_ty), &explicit_ty, initializer, body);
+    let ty = local_var_type(
+        is_var,
+        explicit_ty.as_ref(),
+        initializer,
+        body,
+        source_line(resource),
+    )?;
     let name = resource_var_name(resource)?;
     body.define_local(name, ty.clone());
 
@@ -476,7 +498,7 @@ fn lower_switch_expr(switch: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerRe
     let mut ty = None;
     let cases = lower_switch_cases(switch, body, &mut ty)?;
 
-    let ty = ty.unwrap_or_else(|| Ty::Class(Ustr::from("java/lang/Object")));
+    let ty = ty.unwrap_or_else(Ty::object);
     Ok(body.alloc_expr(Expr::Switch {
         selector,
         cases,

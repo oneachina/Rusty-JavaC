@@ -317,7 +317,7 @@ fn switch_result_ty(ctx: &CodegenCtx, body: &Body, cases: &[SwitchCase]) -> Ty {
         .iter()
         .find_map(|case| case_value(case, body))
         .map(|expr| expr_ty(ctx, body, expr))
-        .unwrap_or_else(|| Ty::Class(ustr::Ustr::from("java/lang/Object")))
+        .unwrap_or_else(Ty::object)
 }
 
 fn case_value(case: &SwitchCase, body: &Body) -> Option<ExprId> {
@@ -361,5 +361,5 @@ fn case_definitely_exits(body: &Body, case: &SwitchCase) -> bool {
 }
 
 fn is_string_ty(ty: &Ty) -> bool {
-    matches!(ty.erasure(), Ty::Class(name) if name.as_str() == "java/lang/String")
+    ty.is_string()
 }

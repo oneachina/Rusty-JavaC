@@ -1,6 +1,7 @@
 use javac_ast::JavaSyntaxKind;
 use javac_call_resolver::ClassCatalog;
 use javac_lexer::Lexer;
+use javac_ty::descriptor::{descriptor_to_ty, method_descriptor_to_sig};
 use rust_asm::class_reader::read_class_file;
 use std::fs;
 use std::io::Read;
@@ -196,20 +197,68 @@ impl ClasspathScanner {
         bytes: &[u8],
         fallback_internal_name: Option<String>,
     ) {
-        match read_class_file(bytes).and_then(|class_file| {
-            class_file
-                .class_name(class_file.this_class)
-                .map(str::to_string)
-        }) {
-            Ok(internal_name) => self.catalog.insert_internal_class(internal_name),
-            Err(error) => {
-                if let Some(internal_name) = fallback_internal_name {
-                    self.catalog.insert_internal_class(internal_name);
-                } else {
-                    self.errors.push(format!(
-                        "failed to read class metadata from {label}: {error}"
-                    ));
+        match read_class_file(bytes) {
+            Ok(class_file) => match class_file.class_name(class_file.this_class) {
+                Ok(internal_name) => {
+                    let internal_name = internal_name.to_string();
+                    self.catalog.insert_internal_class(&internal_name);
+                    if class_file.access_flags & 0x0200 != 0 {
+                        self.catalog.mark_interface(&internal_name);
+                    }
+                    self.register_class_members(&internal_name, &class_file);
                 }
+                Err(error) => self.handle_class_read_error(label, fallback_internal_name, error),
+            },
+            Err(error) => {
+                self.handle_class_read_error(label, fallback_internal_name, error);
+            }
+        }
+    }
+
+    fn handle_class_read_error(
+        &mut self,
+        label: &str,
+        fallback_internal_name: Option<String>,
+        error: impl std::fmt::Display,
+    ) {
+        if let Some(internal_name) = fallback_internal_name {
+            self.catalog.insert_internal_class(internal_name);
+        } else {
+            self.errors.push(format!(
+                "failed to read class metadata from {label}: {error}"
+            ));
+        }
+    }
+
+    fn register_class_members(
+        &mut self,
+        internal_name: &str,
+        class_file: &rust_asm::class_reader::ClassFile,
+    ) {
+        let is_interface = class_file.access_flags & 0x0200 != 0;
+        for field in &class_file.fields {
+            let Ok(name) = class_file.cp_utf8(field.name_index) else {
+                continue;
+            };
+            let Ok(descriptor) = class_file.cp_utf8(field.descriptor_index) else {
+                continue;
+            };
+            if let Some(ty) = descriptor_to_ty(descriptor) {
+                self.catalog
+                    .insert_field(internal_name, name, descriptor, ty, field.access_flags);
+            }
+        }
+
+        for method in &class_file.methods {
+            let Ok(name) = class_file.cp_utf8(method.name_index) else {
+                continue;
+            };
+            let Ok(descriptor) = class_file.cp_utf8(method.descriptor_index) else {
+                continue;
+            };
+            if let Some(sig) = method_descriptor_to_sig(name, descriptor) {
+                self.catalog
+                    .insert_method(internal_name, sig, method.access_flags, is_interface);
             }
         }
     }
