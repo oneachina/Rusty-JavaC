@@ -83,6 +83,23 @@ pub(super) fn emit_post_inc_dec(
     push_default_value(mw, &expr_ty(ctx, body, target));
 }
 
+pub(super) fn emit_inc_dec_for_effect(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    body: &Body,
+    target: ExprId,
+    amount: i16,
+) -> bool {
+    if let Expr::Ident(name) = &body.exprs[target]
+        && let Some(slot) = ctx.get_local(*name)
+    {
+        mw.visit_iinc_insn(slot, amount);
+        return true;
+    }
+
+    false
+}
+
 fn emit_local_assign(
     mw: &mut MethodWriter,
     ctx: &mut CodegenCtx,

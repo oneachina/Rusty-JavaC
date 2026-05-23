@@ -119,6 +119,27 @@ pub(crate) fn discard_expr(
     pop_ty(mw, &expr_ty(ctx, body, expr_id));
 }
 
+pub(crate) fn gen_expr_for_effect(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    body: &Body,
+    expr_id: ExprId,
+) {
+    match &body.exprs[expr_id] {
+        Expr::PostInc(target)
+        | Expr::Unary {
+            op: UnaryOp::PreInc,
+            operand: target,
+        } if assign::emit_inc_dec_for_effect(mw, ctx, body, *target, 1) => {}
+        Expr::PostDec(target)
+        | Expr::Unary {
+            op: UnaryOp::PreDec,
+            operand: target,
+        } if assign::emit_inc_dec_for_effect(mw, ctx, body, *target, -1) => {}
+        _ => discard_expr(mw, ctx, body, expr_id),
+    }
+}
+
 pub(crate) fn is_string(ty: &Ty) -> bool {
     matches!(ty.erasure(), Ty::Class(name) if name.as_str() == "java/lang/String")
 }

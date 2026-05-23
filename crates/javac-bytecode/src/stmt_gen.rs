@@ -21,9 +21,7 @@ pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_i
             mw.visit_insn(opcodes::RETURN);
         }
         Stmt::Expr(expr_id) => {
-            crate::expr_gen::gen_expr(mw, ctx, body, *expr_id);
-            let ty = crate::expr_gen::expr_ty(ctx, body, *expr_id);
-            crate::expr_gen::pop_ty(mw, &ty);
+            crate::expr_gen::gen_expr_for_effect(mw, ctx, body, *expr_id);
         }
         Stmt::Empty => {}
         Stmt::Block(block) => {
@@ -125,9 +123,7 @@ pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_i
             ctx.continue_labels.pop();
             mw.visit_label(continue_label);
             if let Some(update) = update {
-                crate::expr_gen::gen_expr(mw, ctx, body, *update);
-                let update_ty = crate::expr_gen::expr_ty(ctx, body, *update);
-                crate::expr_gen::pop_ty(mw, &update_ty);
+                crate::expr_gen::gen_expr_for_effect(mw, ctx, body, *update);
             }
             mw.visit_jump_insn(opcodes::GOTO, start_label);
             mw.visit_label(end_label);
