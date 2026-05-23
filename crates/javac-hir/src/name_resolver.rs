@@ -9,11 +9,17 @@ pub struct Scope {
 
 impl Scope {
     pub fn new() -> Self {
-        Self { vars: HashMap::new(), parent: None }
+        Self {
+            vars: HashMap::new(),
+            parent: None,
+        }
     }
 
     pub fn child(&self) -> Self {
-        Self { vars: HashMap::new(), parent: Some(Box::new(self.clone())) }
+        Self {
+            vars: HashMap::new(),
+            parent: Some(Box::new(self.clone())),
+        }
     }
 
     pub fn define(&mut self, name: String, ty: Ty) {
@@ -21,6 +27,8 @@ impl Scope {
     }
 
     pub fn resolve(&self, name: &str) -> Option<&Ty> {
-        self.vars.get(name).or_else(|| self.parent.as_ref()?.resolve(name))
+        self.vars
+            .get(name)
+            .or_else(|| self.parent.as_ref()?.resolve(name))
     }
 }

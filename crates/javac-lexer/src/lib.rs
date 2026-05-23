@@ -15,7 +15,9 @@ pub struct Lexer<'src> {
 
 impl<'src> Lexer<'src> {
     pub fn new(source: &'src str) -> Self {
-        Self { inner: logos::Lexer::new(source) }
+        Self {
+            inner: logos::Lexer::new(source),
+        }
     }
 }
 

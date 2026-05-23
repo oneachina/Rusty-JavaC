@@ -1,5 +1,5 @@
-use crate::parser::{stmt, ty, type_decl};
 use crate::parser::{JavaSyntaxKind, Parser};
+use crate::parser::{stmt, ty, type_decl};
 
 pub(crate) fn expr(p: &mut Parser) {
     assignment_expr(p);

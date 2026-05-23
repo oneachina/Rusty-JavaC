@@ -3,8 +3,13 @@ use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SyntaxErrorKind {
-    ExpectedToken { expected: JavaSyntaxKind, found: JavaSyntaxKind },
-    UnexpectedToken { found: JavaSyntaxKind },
+    ExpectedToken {
+        expected: JavaSyntaxKind,
+        found: JavaSyntaxKind,
+    },
+    UnexpectedToken {
+        found: JavaSyntaxKind,
+    },
     MissingSemicolon,
     MissingClosingBrace,
     MissingClosingParen,

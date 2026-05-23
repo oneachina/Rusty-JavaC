@@ -1,5 +1,5 @@
-use crate::parser::{Parser, JavaSyntaxKind};
-use crate::parser::{top_level, ty, member, expr};
+use crate::parser::{JavaSyntaxKind, Parser};
+use crate::parser::{expr, member, top_level, ty};
 
 pub(crate) fn type_decl(p: &mut Parser) {
     use JavaSyntaxKind::*;
@@ -19,10 +19,18 @@ pub(crate) fn class_decl(p: &mut Parser) {
     let m = p.start();
     p.expect(ClassKw);
     p.expect(Ident);
-    if p.at(Lt) { ty::type_param_list(p); }
-    if p.eat(ExtendsKw) { ty::type_(p); }
-    if p.eat(ImplementsKw) { ty::type_list(p); }
-    if p.at(PermitsKw) { permits_clause(p); }
+    if p.at(Lt) {
+        ty::type_param_list(p);
+    }
+    if p.eat(ExtendsKw) {
+        ty::type_(p);
+    }
+    if p.eat(ImplementsKw) {
+        ty::type_list(p);
+    }
+    if p.at(PermitsKw) {
+        permits_clause(p);
+    }
     class_body(p);
     m.complete(p, ClassDecl);
 }
@@ -32,9 +40,15 @@ pub(crate) fn interface_decl(p: &mut Parser) {
     let m = p.start();
     p.expect(InterfaceKw);
     p.expect(Ident);
-    if p.at(Lt) { ty::type_param_list(p); }
-    if p.eat(ExtendsKw) { ty::type_list(p); }
-    if p.at(PermitsKw) { permits_clause(p); }
+    if p.at(Lt) {
+        ty::type_param_list(p);
+    }
+    if p.eat(ExtendsKw) {
+        ty::type_list(p);
+    }
+    if p.at(PermitsKw) {
+        permits_clause(p);
+    }
     class_body(p);
     m.complete(p, InterfaceDecl);
 }
@@ -44,8 +58,12 @@ pub(crate) fn enum_decl(p: &mut Parser) {
     let m = p.start();
     p.expect(EnumKw);
     p.expect(Ident);
-    if p.at(Lt) { ty::type_param_list(p); }
-    if p.eat(ImplementsKw) { ty::type_list(p); }
+    if p.at(Lt) {
+        ty::type_param_list(p);
+    }
+    if p.eat(ImplementsKw) {
+        ty::type_list(p);
+    }
     enum_body(p);
     m.complete(p, EnumDecl);
 }
@@ -55,9 +73,13 @@ pub(crate) fn record_decl(p: &mut Parser) {
     let m = p.start();
     p.expect(RecordKw);
     p.expect(Ident);
-    if p.at(Lt) { ty::type_param_list(p); }
+    if p.at(Lt) {
+        ty::type_param_list(p);
+    }
     member::record_component_list(p);
-    if p.eat(ImplementsKw) { ty::type_list(p); }
+    if p.eat(ImplementsKw) {
+        ty::type_list(p);
+    }
     class_body(p);
     m.complete(p, RecordDecl);
 }
@@ -84,7 +106,9 @@ pub(crate) fn class_body(p: &mut Parser) {
     use JavaSyntaxKind::*;
     let m = p.start();
     p.expect(LBrace);
-    while !p.at(RBrace) && p.kind() != Error { member::class_member(p); }
+    while !p.at(RBrace) && p.kind() != Error {
+        member::class_member(p);
+    }
     p.expect(RBrace);
     m.complete(p, ClassBody);
 }
@@ -93,9 +117,13 @@ pub(crate) fn enum_body(p: &mut Parser) {
     use JavaSyntaxKind::*;
     let m = p.start();
     p.expect(LBrace);
-    if !p.at(RBrace) { enum_constant_list(p); }
+    if !p.at(RBrace) {
+        enum_constant_list(p);
+    }
     if p.eat(Semi) {
-        while !p.at(RBrace) && p.kind() != Error { member::class_member(p); }
+        while !p.at(RBrace) && p.kind() != Error {
+            member::class_member(p);
+        }
     }
     p.expect(RBrace);
     m.complete(p, EnumBody);
@@ -106,7 +134,9 @@ pub(crate) fn enum_constant_list(p: &mut Parser) {
     let m = p.start();
     loop {
         enum_constant(p);
-        if !p.eat(Comma) { break; }
+        if !p.eat(Comma) {
+            break;
+        }
     }
     m.complete(p, EnumConstantList);
 }
@@ -116,7 +146,11 @@ pub(crate) fn enum_constant(p: &mut Parser) {
     let m = p.start();
     top_level::modifier_list(p);
     p.expect(Ident);
-    if p.at(LParen) { expr::argument_list(p); }
-    if p.at(LBrace) { class_body(p); }
+    if p.at(LParen) {
+        expr::argument_list(p);
+    }
+    if p.at(LBrace) {
+        class_body(p);
+    }
     m.complete(p, EnumConstant);
 }

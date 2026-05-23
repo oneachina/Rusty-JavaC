@@ -44,17 +44,33 @@ impl Ty {
             Ty::TypeVar(_) => Ty::Class(Ustr::from("java/lang/Object")),
             Ty::Wildcard(Some(bound)) => bound.erasure(),
             Ty::Wildcard(None) => Ty::Class(Ustr::from("java/lang/Object")),
-            Ty::Intersection(types) => types.first().map(|t| t.erasure()).unwrap_or(Ty::Class(Ustr::from("java/lang/Object"))),
+            Ty::Intersection(types) => types
+                .first()
+                .map(|t| t.erasure())
+                .unwrap_or(Ty::Class(Ustr::from("java/lang/Object"))),
             other => other.clone(),
         }
     }
 
     pub fn is_primitive(&self) -> bool {
-        matches!(self, Ty::Boolean | Ty::Byte | Ty::Char | Ty::Short | Ty::Int | Ty::Long | Ty::Float | Ty::Double)
+        matches!(
+            self,
+            Ty::Boolean
+                | Ty::Byte
+                | Ty::Char
+                | Ty::Short
+                | Ty::Int
+                | Ty::Long
+                | Ty::Float
+                | Ty::Double
+        )
     }
 
     pub fn is_numeric(&self) -> bool {
-        matches!(self, Ty::Byte | Ty::Short | Ty::Int | Ty::Long | Ty::Float | Ty::Double | Ty::Char)
+        matches!(
+            self,
+            Ty::Byte | Ty::Short | Ty::Int | Ty::Long | Ty::Float | Ty::Double | Ty::Char
+        )
     }
 
     pub fn is_integral(&self) -> bool {

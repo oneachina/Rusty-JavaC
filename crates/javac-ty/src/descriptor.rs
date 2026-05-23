@@ -1,5 +1,5 @@
-use crate::ty::Ty;
 use crate::method_sig::MethodSig;
+use crate::ty::Ty;
 
 pub fn field_descriptor(ty: &Ty) -> String {
     ty.erasure().descriptor()

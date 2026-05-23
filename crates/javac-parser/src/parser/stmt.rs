@@ -1,11 +1,13 @@
-use crate::parser::{Parser, JavaSyntaxKind};
-use crate::parser::{expr, ty, top_level};
+use crate::parser::{JavaSyntaxKind, Parser};
+use crate::parser::{expr, top_level, ty};
 
 pub(crate) fn block(p: &mut Parser) {
     use JavaSyntaxKind::*;
     let m = p.start();
     p.expect(LBrace);
-    while !p.at(RBrace) && p.kind() != Error { stmt(p); }
+    while !p.at(RBrace) && p.kind() != Error {
+        stmt(p);
+    }
     p.expect(RBrace);
     m.complete(p, Block);
 }
@@ -40,9 +42,13 @@ pub(crate) fn if_stmt(p: &mut Parser) {
     use JavaSyntaxKind::*;
     let m = p.start();
     p.expect(IfKw);
-    p.expect(LParen); expr::expr(p); p.expect(RParen);
+    p.expect(LParen);
+    expr::expr(p);
+    p.expect(RParen);
     stmt(p);
-    if p.eat(ElseKw) { stmt(p); }
+    if p.eat(ElseKw) {
+        stmt(p);
+    }
     m.complete(p, IfStmt);
 }
 
@@ -56,9 +62,13 @@ pub(crate) fn for_stmt(p: &mut Parser) {
     } else {
         for_init(p);
         p.expect(Semi);
-        if !p.at(Semi) { expr::expr(p); }
+        if !p.at(Semi) {
+            expr::expr(p);
+        }
         p.expect(Semi);
-        if !p.at(RParen) { expr::expr_list(p); }
+        if !p.at(RParen) {
+            expr::expr_list(p);
+        }
         p.expect(RParen);
         stmt(p);
     }
@@ -71,7 +81,12 @@ pub(crate) fn is_foreach(p: &mut Parser) -> bool {
     while i < p.tokens.len() {
         match p.tokens[i].kind {
             JavaSyntaxKind::LParen => depth += 1,
-            JavaSyntaxKind::RParen => { depth -= 1; if depth == 0 { return false; } }
+            JavaSyntaxKind::RParen => {
+                depth -= 1;
+                if depth == 0 {
+                    return false;
+                }
+            }
             JavaSyntaxKind::Colon if depth == 1 => return true,
             _ => {}
         }
@@ -106,15 +121,23 @@ pub(crate) fn for_init(p: &mut Parser) {
         loop {
             let vm = p.start();
             p.expect(Ident);
-            while p.eat(LBrack) { p.expect(RBrack); }
-            if p.eat(Eq) { expr::expr(p); }
+            while p.eat(LBrack) {
+                p.expect(RBrack);
+            }
+            if p.eat(Eq) {
+                expr::expr(p);
+            }
             vm.complete(p, VarDeclarator);
-            if !p.eat(Comma) { break; }
+            if !p.eat(Comma) {
+                break;
+            }
         }
         vlm.complete(p, VarDeclaratorList);
     } else {
         expr::expr(p);
-        if p.eat(Comma) { expr::expr_list(p); }
+        if p.eat(Comma) {
+            expr::expr_list(p);
+        }
     }
     m.complete(p, ForInit);
 }
@@ -123,7 +146,9 @@ pub(crate) fn while_stmt(p: &mut Parser) {
     use JavaSyntaxKind::*;
     let m = p.start();
     p.expect(WhileKw);
-    p.expect(LParen); expr::expr(p); p.expect(RParen);
+    p.expect(LParen);
+    expr::expr(p);
+    p.expect(RParen);
     stmt(p);
     m.complete(p, WhileStmt);
 }
@@ -134,7 +159,9 @@ pub(crate) fn do_stmt(p: &mut Parser) {
     p.expect(DoKw);
     stmt(p);
     p.expect(WhileKw);
-    p.expect(LParen); expr::expr(p); p.expect(RParen);
+    p.expect(LParen);
+    expr::expr(p);
+    p.expect(RParen);
     p.expect(Semi);
     m.complete(p, DoStmt);
 }
@@ -143,7 +170,9 @@ pub(crate) fn switch_expr(p: &mut Parser) {
     use JavaSyntaxKind::*;
     let m = p.start();
     p.expect(SwitchKw);
-    p.expect(LParen); expr::expr(p); p.expect(RParen);
+    p.expect(LParen);
+    expr::expr(p);
+    p.expect(RParen);
     let sbm = p.start();
     p.expect(LBrace);
     while !p.at(RBrace) && p.kind() != Error {
@@ -166,9 +195,14 @@ pub(crate) fn switch_label(p: &mut Parser) {
         } else {
             p.expect(Arrow);
             let rm = p.start();
-            if p.at(ThrowKw) { stmt(p); }
-            else if p.at(LBrace) { block(p); }
-            else { expr::expr(p); p.eat(Semi); }
+            if p.at(ThrowKw) {
+                stmt(p);
+            } else if p.at(LBrace) {
+                block(p);
+            } else {
+                expr::expr(p);
+                p.eat(Semi);
+            }
             rm.complete(p, SwitchRule);
         }
     } else {
@@ -180,9 +214,14 @@ pub(crate) fn switch_label(p: &mut Parser) {
         } else {
             p.expect(Arrow);
             let rm = p.start();
-            if p.at(ThrowKw) { stmt(p); }
-            else if p.at(LBrace) { block(p); }
-            else { expr::expr(p); p.eat(Semi); }
+            if p.at(ThrowKw) {
+                stmt(p);
+            } else if p.at(LBrace) {
+                block(p);
+            } else {
+                expr::expr(p);
+                p.eat(Semi);
+            }
             rm.complete(p, SwitchRule);
         }
     }
@@ -201,15 +240,21 @@ pub(crate) fn try_stmt(p: &mut Parser) {
             top_level::modifier_list(p);
             ty::type_(p);
             p.expect(Ident);
-            if p.eat(Eq) { expr::expr(p); }
+            if p.eat(Eq) {
+                expr::expr(p);
+            }
             rm.complete(p, Resource);
-            if !p.eat(Semi) { break; }
+            if !p.eat(Semi) {
+                break;
+            }
         }
         p.expect(RParen);
         twm.complete(p, TryWithResources);
     }
     block(p);
-    while p.at(CatchKw) { catch_clause(p); }
+    while p.at(CatchKw) {
+        catch_clause(p);
+    }
     if p.at(FinallyKw) {
         let fm = p.start();
         p.expect(FinallyKw);
@@ -236,7 +281,9 @@ pub(crate) fn return_stmt(p: &mut Parser) {
     use JavaSyntaxKind::*;
     let m = p.start();
     p.expect(ReturnKw);
-    if !p.at(Semi) { expr::expr(p); }
+    if !p.at(Semi) {
+        expr::expr(p);
+    }
     p.expect(Semi);
     m.complete(p, ReturnStmt);
 }
@@ -254,7 +301,9 @@ pub(crate) fn break_stmt(p: &mut Parser) {
     use JavaSyntaxKind::*;
     let m = p.start();
     p.expect(BreakKw);
-    if p.at(Ident) { p.bump(); }
+    if p.at(Ident) {
+        p.bump();
+    }
     p.expect(Semi);
     m.complete(p, BreakStmt);
 }
@@ -263,7 +312,9 @@ pub(crate) fn continue_stmt(p: &mut Parser) {
     use JavaSyntaxKind::*;
     let m = p.start();
     p.expect(ContinueKw);
-    if p.at(Ident) { p.bump(); }
+    if p.at(Ident) {
+        p.bump();
+    }
     p.expect(Semi);
     m.complete(p, ContinueStmt);
 }
@@ -272,7 +323,9 @@ pub(crate) fn synchronized_stmt(p: &mut Parser) {
     use JavaSyntaxKind::*;
     let m = p.start();
     p.expect(SynchronizedKw);
-    p.expect(LParen); expr::expr(p); p.expect(RParen);
+    p.expect(LParen);
+    expr::expr(p);
+    p.expect(RParen);
     block(p);
     m.complete(p, SynchronizedStmt);
 }
@@ -282,7 +335,9 @@ pub(crate) fn assert_stmt(p: &mut Parser) {
     let m = p.start();
     p.expect(AssertKw);
     expr::expr(p);
-    if p.eat(Colon) { expr::expr(p); }
+    if p.eat(Colon) {
+        expr::expr(p);
+    }
     p.expect(Semi);
     m.complete(p, AssertStmt);
 }
@@ -298,10 +353,15 @@ pub(crate) fn yield_stmt(p: &mut Parser) {
 
 pub(crate) fn is_local_var_decl(p: &Parser) -> bool {
     use JavaSyntaxKind::*;
-    let primitives = [IntKw, LongKw, ShortKw, ByteKw, CharKw,
-        FloatKw, DoubleKw, BooleanKw, VoidKw, VarKw];
-    if p.at_any(&primitives) { return true; }
-    if !p.at(Ident) { return false; }
+    let primitives = [
+        IntKw, LongKw, ShortKw, ByteKw, CharKw, FloatKw, DoubleKw, BooleanKw, VoidKw, VarKw,
+    ];
+    if p.at_any(&primitives) {
+        return true;
+    }
+    if !p.at(Ident) {
+        return false;
+    }
     let mut i = p.pos;
     while i < p.tokens.len() && p.tokens[i].kind == Ident {
         i += 1;
@@ -310,13 +370,23 @@ pub(crate) fn is_local_var_decl(p: &Parser) -> bool {
             while i < p.tokens.len() {
                 match p.tokens[i].kind {
                     Lt => depth += 1,
-                    Gt => { depth -= 1; if depth == 0 { i += 1; break; } }
+                    Gt => {
+                        depth -= 1;
+                        if depth == 0 {
+                            i += 1;
+                            break;
+                        }
+                    }
                     _ => {}
                 }
                 i += 1;
             }
         }
-        if i < p.tokens.len() && p.tokens[i].kind == Dot { i += 1; } else { break; }
+        if i < p.tokens.len() && p.tokens[i].kind == Dot {
+            i += 1;
+        } else {
+            break;
+        }
     }
     while i + 1 < p.tokens.len() && p.tokens[i].kind == LBrack && p.tokens[i + 1].kind == RBrack {
         i += 2;
@@ -332,10 +402,16 @@ pub(crate) fn local_var_decl(p: &mut Parser) {
     loop {
         let vm = p.start();
         p.expect(Ident);
-        while p.eat(LBrack) { p.expect(RBrack); }
-        if p.eat(Eq) { expr::expr(p); }
+        while p.eat(LBrack) {
+            p.expect(RBrack);
+        }
+        if p.eat(Eq) {
+            expr::expr(p);
+        }
         vm.complete(p, VarDeclarator);
-        if !p.eat(Comma) { break; }
+        if !p.eat(Comma) {
+            break;
+        }
     }
     vlm.complete(p, VarDeclaratorList);
     p.expect(Semi);

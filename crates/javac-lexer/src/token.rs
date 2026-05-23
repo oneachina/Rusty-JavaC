@@ -1,5 +1,5 @@
-use logos::Logos;
 use javac_ast::JavaSyntaxKind;
+use logos::Logos;
 
 macro_rules! define_tokens {
     (

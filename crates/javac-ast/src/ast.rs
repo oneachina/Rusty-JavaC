@@ -52,21 +52,35 @@ macro_rules! ast_node {
 
 ast_node!(CompilationUnit, CompilationUnit);
 impl CompilationUnit {
-    pub fn package(&self) -> Option<PackageDecl> { child(&self.0) }
-    pub fn imports(&self) -> impl Iterator<Item = ImportDecl> { children(&self.0) }
-    pub fn type_decls(&self) -> impl Iterator<Item = TypeDecl> { children(&self.0) }
+    pub fn package(&self) -> Option<PackageDecl> {
+        child(&self.0)
+    }
+    pub fn imports(&self) -> impl Iterator<Item = ImportDecl> {
+        children(&self.0)
+    }
+    pub fn type_decls(&self) -> impl Iterator<Item = TypeDecl> {
+        children(&self.0)
+    }
 }
 
 ast_node!(PackageDecl, PackageDecl);
 impl PackageDecl {
-    pub fn name(&self) -> Option<QualifiedName> { child(&self.0) }
+    pub fn name(&self) -> Option<QualifiedName> {
+        child(&self.0)
+    }
 }
 
 ast_node!(ImportDecl, ImportDecl);
 impl ImportDecl {
-    pub fn name(&self) -> Option<QualifiedName> { child(&self.0) }
-    pub fn is_static(&self) -> bool { token(&self.0, JavaSyntaxKind::StaticKw).is_some() }
-    pub fn is_wildcard(&self) -> bool { token(&self.0, JavaSyntaxKind::Star).is_some() }
+    pub fn name(&self) -> Option<QualifiedName> {
+        child(&self.0)
+    }
+    pub fn is_static(&self) -> bool {
+        token(&self.0, JavaSyntaxKind::StaticKw).is_some()
+    }
+    pub fn is_wildcard(&self) -> bool {
+        token(&self.0, JavaSyntaxKind::Star).is_some()
+    }
 }
 
 ast_node!(QualifiedName, QualifiedName);
@@ -99,7 +113,9 @@ impl AstNode for TypeDecl {
             JavaSyntaxKind::InterfaceDecl => InterfaceDecl::cast(syntax).map(TypeDecl::Interface),
             JavaSyntaxKind::EnumDecl => EnumDecl::cast(syntax).map(TypeDecl::Enum),
             JavaSyntaxKind::RecordDecl => RecordDecl::cast(syntax).map(TypeDecl::Record),
-            JavaSyntaxKind::AnnotationDecl => AnnotationDecl::cast(syntax).map(TypeDecl::Annotation),
+            JavaSyntaxKind::AnnotationDecl => {
+                AnnotationDecl::cast(syntax).map(TypeDecl::Annotation)
+            }
             _ => None,
         }
     }
@@ -117,14 +133,22 @@ impl AstNode for TypeDecl {
 
 ast_node!(ClassDecl, ClassDecl);
 impl ClassDecl {
-    pub fn name(&self) -> Option<JavaSyntaxToken> { token(&self.0, JavaSyntaxKind::Ident) }
-    pub fn body(&self) -> Option<ClassBody> { child(&self.0) }
+    pub fn name(&self) -> Option<JavaSyntaxToken> {
+        token(&self.0, JavaSyntaxKind::Ident)
+    }
+    pub fn body(&self) -> Option<ClassBody> {
+        child(&self.0)
+    }
 }
 
 ast_node!(InterfaceDecl, InterfaceDecl);
 impl InterfaceDecl {
-    pub fn name(&self) -> Option<JavaSyntaxToken> { token(&self.0, JavaSyntaxKind::Ident) }
-    pub fn body(&self) -> Option<ClassBody> { child(&self.0) }
+    pub fn name(&self) -> Option<JavaSyntaxToken> {
+        token(&self.0, JavaSyntaxKind::Ident)
+    }
+    pub fn body(&self) -> Option<ClassBody> {
+        child(&self.0)
+    }
 }
 
 ast_node!(EnumDecl, EnumDecl);
@@ -133,7 +157,9 @@ ast_node!(AnnotationDecl, AnnotationDecl);
 
 ast_node!(ClassBody, ClassBody);
 impl ClassBody {
-    pub fn members(&self) -> impl Iterator<Item = ClassMember> { children(&self.0) }
+    pub fn members(&self) -> impl Iterator<Item = ClassMember> {
+        children(&self.0)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -159,7 +185,9 @@ impl AstNode for ClassMember {
         match syntax.kind() {
             JavaSyntaxKind::MethodDecl => MethodDecl::cast(syntax).map(ClassMember::Method),
             JavaSyntaxKind::FieldDecl => FieldDecl::cast(syntax).map(ClassMember::Field),
-            JavaSyntaxKind::ConstructorDecl => ConstructorDecl::cast(syntax).map(ClassMember::Constructor),
+            JavaSyntaxKind::ConstructorDecl => {
+                ConstructorDecl::cast(syntax).map(ClassMember::Constructor)
+            }
             JavaSyntaxKind::ClassDecl => ClassDecl::cast(syntax).map(ClassMember::Class),
             _ => None,
         }
@@ -177,14 +205,22 @@ impl AstNode for ClassMember {
 
 ast_node!(MethodDecl, MethodDecl);
 impl MethodDecl {
-    pub fn name(&self) -> Option<JavaSyntaxToken> { token(&self.0, JavaSyntaxKind::Ident) }
-    pub fn body(&self) -> Option<MethodBody> { child(&self.0) }
-    pub fn return_type(&self) -> Option<Type> { child(&self.0) }
+    pub fn name(&self) -> Option<JavaSyntaxToken> {
+        token(&self.0, JavaSyntaxKind::Ident)
+    }
+    pub fn body(&self) -> Option<MethodBody> {
+        child(&self.0)
+    }
+    pub fn return_type(&self) -> Option<Type> {
+        child(&self.0)
+    }
 }
 
 ast_node!(FieldDecl, FieldDecl);
 impl FieldDecl {
-    pub fn ty(&self) -> Option<Type> { child(&self.0) }
+    pub fn ty(&self) -> Option<Type> {
+        child(&self.0)
+    }
     // Declarators usually follow
 }
 
@@ -192,7 +228,9 @@ ast_node!(ConstructorDecl, ConstructorDecl);
 
 ast_node!(MethodBody, MethodBody);
 impl MethodBody {
-    pub fn block(&self) -> Option<Block> { child(&self.0) }
+    pub fn block(&self) -> Option<Block> {
+        child(&self.0)
+    }
 }
 
 ast_node!(Block, Block);
@@ -207,18 +245,18 @@ mod tests {
 
     fn build_method_decl_node() -> JavaSyntaxNode {
         let mut builder = GreenNodeBuilder::new();
-        
+
         builder.start_node(JavaSyntaxKind::MethodDecl.into());
-        
+
         builder.token(JavaSyntaxKind::Ident.into(), "myMethod");
-        
+
         builder.start_node(JavaSyntaxKind::MethodBody.into());
         builder.start_node(JavaSyntaxKind::Block.into());
         builder.finish_node(); // Block
         builder.finish_node(); // MethodBody
-        
+
         builder.finish_node(); // MethodDecl
-        
+
         let green = builder.finish();
         JavaSyntaxNode::new_root(green)
     }
@@ -226,11 +264,11 @@ mod tests {
     #[test]
     fn test_ast_node_cast_and_token() {
         let syntax = build_method_decl_node();
-        
+
         // Test casting
         assert!(MethodDecl::can_cast(syntax.kind()));
         let method = MethodDecl::cast(syntax).expect("Should cast to MethodDecl");
-        
+
         // Test token getter
         let name_token = method.name().expect("Should have a name token");
         assert_eq!(name_token.text(), "myMethod");
@@ -241,11 +279,11 @@ mod tests {
     fn test_ast_node_child_access() {
         let syntax = build_method_decl_node();
         let method = MethodDecl::cast(syntax).unwrap();
-        
+
         // Test child node getter
         let body = method.body().expect("Should have a body");
         assert!(MethodBody::can_cast(body.syntax().kind()));
-        
+
         // Test nested child
         let block = body.block().expect("Body should have a block");
         assert!(Block::can_cast(block.syntax().kind()));
