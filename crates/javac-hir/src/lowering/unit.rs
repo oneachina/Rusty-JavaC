@@ -12,22 +12,26 @@ use ustr::Ustr;
 
 pub(super) fn lower_compilation_unit(node: &JavaSyntaxNode) -> LowerResult<CompilationUnit> {
     let unit = AstCompilationUnit::cast(node.clone()).ok_or(LowerError::ExpectedCompilationUnit)?;
-    reject_unsupported_package(&unit)?;
+    let package = lower_package(&unit)?;
     let imports = lower_imports(&unit)?;
-    let type_decls = lower_top_level_types(node)?;
+    let type_decls = lower_top_level_types(node, package.as_ref())?;
 
     Ok(CompilationUnit {
-        package: None,
+        package,
         imports,
         type_decls,
     })
 }
 
-fn reject_unsupported_package(unit: &AstCompilationUnit) -> LowerResult<()> {
-    if unit.package().is_some() {
-        return Err(LowerError::PackagesNotSupported);
-    }
-    Ok(())
+fn lower_package(unit: &AstCompilationUnit) -> LowerResult<Option<Package>> {
+    unit.package()
+        .map(|package| {
+            let name = qualified_name_text(package.syntax())?;
+            Ok(Package {
+                name: Ustr::from(&name),
+            })
+        })
+        .transpose()
 }
 
 fn lower_imports(unit: &AstCompilationUnit) -> LowerResult<Vec<Import>> {
@@ -43,7 +47,10 @@ fn lower_import(import: AstImportDecl) -> LowerResult<Import> {
     })
 }
 
-fn lower_top_level_types(node: &JavaSyntaxNode) -> LowerResult<Vec<TypeDecl>> {
+fn lower_top_level_types(
+    node: &JavaSyntaxNode,
+    package: Option<&Package>,
+) -> LowerResult<Vec<TypeDecl>> {
     let mut pending_flags = 0;
     let mut type_decls = Vec::new();
     for child in node.children() {
@@ -51,7 +58,7 @@ fn lower_top_level_types(node: &JavaSyntaxNode) -> LowerResult<Vec<TypeDecl>> {
             JavaSyntaxKind::ModifierList => pending_flags = access_flags(&child),
             JavaSyntaxKind::ClassDecl => {
                 let class = ClassDecl::cast(child).ok_or(LowerError::UnsupportedTypeDeclaration)?;
-                type_decls.push(lower_class_decl(class, pending_flags)?);
+                type_decls.push(lower_class_decl(class, pending_flags, package)?);
                 pending_flags = 0;
             }
             JavaSyntaxKind::InterfaceDecl
@@ -69,8 +76,13 @@ fn lower_top_level_types(node: &JavaSyntaxNode) -> LowerResult<Vec<TypeDecl>> {
     Ok(type_decls)
 }
 
-fn lower_class_decl(class: ClassDecl, access_flags: u16) -> LowerResult<TypeDecl> {
+fn lower_class_decl(
+    class: ClassDecl,
+    access_flags: u16,
+    package: Option<&Package>,
+) -> LowerResult<TypeDecl> {
     let name = class.name().ok_or(LowerError::MissingClassName)?;
+    let internal_name = internal_class_name(package, name.text());
     let type_params = lower_type_params(class.syntax())?;
     let generic_signature = class_signature(class.syntax(), &type_params)?;
     let methods = class
@@ -81,7 +93,7 @@ fn lower_class_decl(class: ClassDecl, access_flags: u16) -> LowerResult<TypeDecl
 
     Ok(TypeDecl {
         id: HirId(0),
-        name: Ustr::from(name.text()),
+        name: Ustr::from(&internal_name),
         kind: TypeDeclKind::Class,
         access_flags,
         super_class: None,
@@ -92,4 +104,15 @@ fn lower_class_decl(class: ClassDecl, access_flags: u16) -> LowerResult<TypeDecl
         methods,
         inner_types: Vec::new(),
     })
+}
+
+fn internal_class_name(package: Option<&Package>, simple_name: &str) -> String {
+    match package {
+        Some(package) => format!(
+            "{}/{}",
+            package.name.as_str().replace('.', "/"),
+            simple_name
+        ),
+        None => simple_name.to_string(),
+    }
 }

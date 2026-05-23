@@ -5,7 +5,6 @@ pub type LowerResult<T> = Result<T, LowerError>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LowerError {
     ExpectedCompilationUnit,
-    PackagesNotSupported,
     UnsupportedTypeDeclaration,
     ExpectedSingleTopLevelClass,
     UnsupportedClassMember,
@@ -21,7 +20,6 @@ impl fmt::Display for LowerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
             LowerError::ExpectedCompilationUnit => "expected compilation unit",
-            LowerError::PackagesNotSupported => "packages are not supported yet",
             LowerError::UnsupportedTypeDeclaration => "only class declarations are supported yet",
             LowerError::ExpectedSingleTopLevelClass => "expected one top-level class",
             LowerError::UnsupportedClassMember => "unsupported class member",
