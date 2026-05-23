@@ -1,12 +1,15 @@
-use javac_ast::JavaSyntaxKind;
+mod source;
+
+use self::source::JavaSource;
 use javac_call_resolver::ClassCatalog;
-use javac_lexer::Lexer;
 use javac_ty::descriptor::{descriptor_to_ty, method_descriptor_to_sig};
 use rust_asm::class_reader::read_class_file;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use zip::ZipArchive;
+
+const ACC_INTERFACE: u16 = 0x0200;
 
 pub(crate) fn build_class_catalog(
     classpath: &[String],
@@ -15,6 +18,7 @@ pub(crate) fn build_class_catalog(
     let mut scanner = ClasspathScanner {
         catalog: ClassCatalog::platform(),
         errors: Vec::new(),
+        sources: Vec::new(),
     };
 
     for source_file in source_files {
@@ -24,6 +28,8 @@ pub(crate) fn build_class_catalog(
     for entry in classpath_entries(classpath) {
         scanner.scan_classpath_entry(&entry);
     }
+
+    scanner.register_source_members();
 
     if scanner.errors.is_empty() {
         Ok(scanner.catalog)
@@ -35,12 +41,13 @@ pub(crate) fn build_class_catalog(
 struct ClasspathScanner {
     catalog: ClassCatalog,
     errors: Vec<String>,
+    sources: Vec<JavaSource>,
 }
 
 impl ClasspathScanner {
     fn register_primary_source(&mut self, path: &Path) {
         if let Ok(source) = fs::read_to_string(path) {
-            self.register_java_source(&source);
+            self.register_java_source(path.display().to_string(), source);
         }
     }
 
@@ -102,7 +109,7 @@ impl ClasspathScanner {
 
     fn register_classpath_source(&mut self, path: &Path) {
         match fs::read_to_string(path) {
-            Ok(source) => self.register_java_source(&source),
+            Ok(source) => self.register_java_source(path.display().to_string(), source),
             Err(error) => self.errors.push(format!(
                 "failed to read classpath source {}: {}",
                 path.display(),
@@ -186,7 +193,7 @@ impl ClasspathScanner {
                     ));
                     continue;
                 }
-                self.register_java_source(&source);
+                self.register_java_source(format!("{}!{}", path.display(), entry_name), source);
             }
         }
     }
@@ -202,7 +209,7 @@ impl ClasspathScanner {
                 Ok(internal_name) => {
                     let internal_name = internal_name.to_string();
                     self.catalog.insert_internal_class(&internal_name);
-                    if class_file.access_flags & 0x0200 != 0 {
+                    if class_file.access_flags & ACC_INTERFACE != 0 {
                         self.catalog.mark_interface(&internal_name);
                     }
                     self.register_class_members(&internal_name, &class_file);
@@ -235,7 +242,7 @@ impl ClasspathScanner {
         internal_name: &str,
         class_file: &rust_asm::class_reader::ClassFile,
     ) {
-        let is_interface = class_file.access_flags & 0x0200 != 0;
+        let is_interface = class_file.access_flags & ACC_INTERFACE != 0;
         for field in &class_file.fields {
             let Ok(name) = class_file.cp_utf8(field.name_index) else {
                 continue;
@@ -263,118 +270,15 @@ impl ClasspathScanner {
         }
     }
 
-    fn register_java_source(&mut self, source: &str) {
-        for internal_name in source_type_names(source) {
+    fn register_java_source(&mut self, label: String, source: String) {
+        for internal_name in source::type_names(&source) {
             self.catalog.insert_internal_class(internal_name);
         }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct Token {
-    kind: JavaSyntaxKind,
-    text: String,
-}
-
-fn source_type_names(source: &str) -> Vec<String> {
-    let tokens = Lexer::new(source)
-        .map(|token| Token {
-            kind: token.kind,
-            text: token.text,
-        })
-        .collect::<Vec<_>>();
-    let package = package_name(&tokens);
-    let mut names = Vec::new();
-    let mut depth = 0usize;
-    let mut i = 0usize;
-
-    while i < tokens.len() {
-        match tokens[i].kind {
-            JavaSyntaxKind::LBrace => {
-                depth += 1;
-                i += 1;
-            }
-            JavaSyntaxKind::RBrace => {
-                depth = depth.saturating_sub(1);
-                i += 1;
-            }
-            kind if depth == 0 && is_type_keyword(kind) => {
-                if let Some(simple_name) = next_ident(&tokens, i + 1) {
-                    names.push(internal_name(package.as_deref(), simple_name));
-                }
-                i += 1;
-            }
-            JavaSyntaxKind::At
-                if depth == 0
-                    && tokens
-                        .get(i + 1)
-                        .is_some_and(|token| token.kind == JavaSyntaxKind::InterfaceKw) =>
-            {
-                if let Some(simple_name) = next_ident(&tokens, i + 2) {
-                    names.push(internal_name(package.as_deref(), simple_name));
-                }
-                i += 3;
-            }
-            _ => i += 1,
-        }
+        self.sources.push(JavaSource::new(label, source));
     }
 
-    names
-}
-
-fn package_name(tokens: &[Token]) -> Option<String> {
-    let package_index = tokens
-        .iter()
-        .position(|token| token.kind == JavaSyntaxKind::PackageKw)?;
-    let (package, _) = qualified_name(tokens, package_index + 1)?;
-    Some(package)
-}
-
-fn qualified_name(tokens: &[Token], start: usize) -> Option<(String, usize)> {
-    let mut name = String::new();
-    let mut i = start;
-    let mut expecting_ident = true;
-
-    while let Some(token) = tokens.get(i) {
-        match token.kind {
-            JavaSyntaxKind::Ident if expecting_ident => {
-                name.push_str(&token.text);
-                expecting_ident = false;
-            }
-            JavaSyntaxKind::Dot if !expecting_ident => {
-                name.push('.');
-                expecting_ident = true;
-            }
-            _ => break,
-        }
-        i += 1;
-    }
-
-    (!name.is_empty() && !expecting_ident).then_some((name, i))
-}
-
-fn next_ident(tokens: &[Token], start: usize) -> Option<&str> {
-    tokens
-        .iter()
-        .skip(start)
-        .find(|token| token.kind == JavaSyntaxKind::Ident)
-        .map(|token| token.text.as_str())
-}
-
-fn is_type_keyword(kind: JavaSyntaxKind) -> bool {
-    matches!(
-        kind,
-        JavaSyntaxKind::ClassKw
-            | JavaSyntaxKind::InterfaceKw
-            | JavaSyntaxKind::EnumKw
-            | JavaSyntaxKind::RecordKw
-    )
-}
-
-fn internal_name(package: Option<&str>, simple_name: &str) -> String {
-    match package {
-        Some(package) => format!("{}/{}", package.replace('.', "/"), simple_name),
-        None => simple_name.to_string(),
+    fn register_source_members(&mut self) {
+        source::register_members(&mut self.catalog, &mut self.errors, &self.sources);
     }
 }
 

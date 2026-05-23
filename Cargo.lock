@@ -208,6 +208,7 @@ dependencies = [
  "javac-ty",
  "rust-asm",
  "text-size",
+ "ustr",
  "zip",
 ]
 

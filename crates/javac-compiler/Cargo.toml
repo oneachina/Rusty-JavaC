@@ -16,4 +16,5 @@ javac-call-resolver = { path = "../javac-call-resolver" }
 javac-diagnostics = { path = "../javac-diagnostics" }
 rust-asm = { workspace = true }
 text-size = { workspace = true }
+ustr = "1.1.0"
 zip = { version = "2", default-features = false, features = ["deflate"] }

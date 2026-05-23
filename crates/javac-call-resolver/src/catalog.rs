@@ -3,7 +3,9 @@ use crate::{FieldRef, MethodRef, calls};
 use javac_ty::{MethodSig, Ty};
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, Clone)]
+const ACC_STATIC: u16 = 0x0008;
+
+#[derive(Debug, Clone, Default)]
 pub struct ClassCatalog {
     classes: HashSet<String>,
     packages: HashSet<String>,
@@ -141,6 +143,7 @@ impl ClassCatalog {
         calls::resolve_static_field(owner, name).or_else(|| {
             self.fields
                 .get(&(owner.to_string(), name.to_string()))
+                .filter(|field| field.access_flags & ACC_STATIC != 0)
                 .cloned()
         })
     }
@@ -163,7 +166,9 @@ impl ClassCatalog {
         let methods = self.methods.get(&(owner, name.to_string()))?;
         methods
             .iter()
-            .find(|method| params_match(&method.params, args))
+            .find(|method| {
+                method.access_flags & ACC_STATIC == 0 && params_match(&method.params, args)
+            })
             .cloned()
     }
 
@@ -180,19 +185,6 @@ impl ClassCatalog {
                     SimpleName::Unique(internal_name.to_string()),
                 );
             }
-        }
-    }
-}
-
-impl Default for ClassCatalog {
-    fn default() -> Self {
-        Self {
-            classes: HashSet::new(),
-            packages: HashSet::new(),
-            simple_names: HashMap::new(),
-            fields: HashMap::new(),
-            methods: HashMap::new(),
-            interfaces: HashSet::new(),
         }
     }
 }
