@@ -1,3 +1,8 @@
 /target
 /.idea
 *.class
+.idea
+
+# Gradle
+gradle-plugin/.gradle
+gradle-plugin/build
