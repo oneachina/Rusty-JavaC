@@ -1,9 +1,10 @@
+use crate::error::BytecodeError;
 use javac_hir::hir::*;
 use javac_ty::{MethodSig, Ty};
 use std::collections::HashMap;
 use ustr::Ustr;
 
-type ValidateResult<T> = Result<T, String>;
+type ValidateResult<T> = Result<T, BytecodeError>;
 
 pub(crate) fn validate_type_decl(type_decl: &TypeDecl) -> ValidateResult<()> {
     let validator = Validator::new(type_decl);
@@ -32,6 +33,7 @@ struct FieldInfo {
 #[derive(Clone)]
 struct MethodScope {
     locals: HashMap<Ustr, Ty>,
+    line: Option<u16>,
 }
 
 impl Validator {
@@ -103,15 +105,18 @@ impl Validator {
         scope: &mut MethodScope,
         stmt_id: StmtId,
     ) -> ValidateResult<()> {
+        let line = body.stmt_lines.get(&stmt_id).copied().or(scope.line);
+        let mut stmt_scope = scope.with_line(line);
+
         match &body.stmts[stmt_id] {
             Stmt::Expr(expr) | Stmt::Throw(expr) | Stmt::Yield(expr) => {
-                self.validate_expr(body, scope, *expr)
+                self.validate_expr(body, &mut stmt_scope, *expr)
             }
-            Stmt::Return(Some(expr)) => self.validate_expr(body, scope, *expr),
+            Stmt::Return(Some(expr)) => self.validate_expr(body, &mut stmt_scope, *expr),
             Stmt::Return(None) | Stmt::Empty | Stmt::Break(_) | Stmt::Continue(_) => Ok(()),
             Stmt::LocalVar(var) => {
                 if let Some(initializer) = var.initializer {
-                    self.validate_expr(body, scope, initializer)?;
+                    self.validate_expr(body, &mut stmt_scope, initializer)?;
                 }
                 scope.locals.insert(var.name, var.ty.clone());
                 Ok(())
@@ -121,8 +126,12 @@ impl Validator {
                 then_branch,
                 else_branch,
             } => {
-                self.validate_expr(body, scope, *condition)?;
-                self.validate_stmt(body, &mut scope.clone(), *then_branch)?;
+                self.validate_expr(body, &mut stmt_scope, *condition)?;
+                let mut then_scope = scope.clone();
+                if let Some((name, ty)) = pattern_binding(body, *condition) {
+                    then_scope.locals.insert(name, ty);
+                }
+                self.validate_stmt(body, &mut then_scope, *then_branch)?;
                 if let Some(else_branch) = else_branch {
                     self.validate_stmt(body, &mut scope.clone(), *else_branch)?;
                 }
@@ -138,6 +147,7 @@ impl Validator {
                 if let Some(init) = init {
                     self.validate_stmt(body, &mut loop_scope, *init)?;
                 }
+                loop_scope.line = line;
                 if let Some(condition) = condition {
                     self.validate_expr(body, &mut loop_scope, *condition)?;
                 }
@@ -153,6 +163,7 @@ impl Validator {
                 body: loop_body,
             } => {
                 let mut loop_scope = scope.clone();
+                loop_scope.line = line;
                 self.validate_expr(body, &mut loop_scope, *iterable)?;
                 loop_scope.locals.insert(*var_name, var_type.clone());
                 self.validate_stmt(body, &mut loop_scope, *loop_body)
@@ -161,7 +172,7 @@ impl Validator {
                 condition,
                 body: loop_body,
             } => {
-                self.validate_expr(body, scope, *condition)?;
+                self.validate_expr(body, &mut stmt_scope, *condition)?;
                 self.validate_stmt(body, &mut scope.clone(), *loop_body)
             }
             Stmt::Do {
@@ -169,13 +180,13 @@ impl Validator {
                 condition,
             } => {
                 self.validate_stmt(body, &mut scope.clone(), *loop_body)?;
-                self.validate_expr(body, scope, *condition)
+                self.validate_expr(body, &mut stmt_scope, *condition)
             }
             Stmt::Switch { selector, cases } => {
-                self.validate_expr(body, scope, *selector)?;
+                self.validate_expr(body, &mut stmt_scope, *selector)?;
                 for case in cases {
                     if let SwitchCase::Case { pattern, .. } = case {
-                        self.validate_expr(body, scope, *pattern)?;
+                        self.validate_expr(body, &mut stmt_scope, *pattern)?;
                     }
                     let mut case_scope = scope.clone();
                     for stmt in case_stmts(case) {
@@ -186,6 +197,7 @@ impl Validator {
             }
             Stmt::Try(try_stmt) => {
                 let mut try_scope = scope.clone();
+                try_scope.line = line;
                 for resource in &try_stmt.resources {
                     if let Some(initializer) = resource.initializer {
                         self.validate_expr(body, &mut try_scope, initializer)?;
@@ -206,13 +218,13 @@ impl Validator {
                 Ok(())
             }
             Stmt::Synchronized(expr, block) => {
-                self.validate_expr(body, scope, *expr)?;
+                self.validate_expr(body, &mut stmt_scope, *expr)?;
                 self.validate_block(body, &mut scope.clone(), block)
             }
             Stmt::Assert { condition, message } => {
-                self.validate_expr(body, scope, *condition)?;
+                self.validate_expr(body, &mut stmt_scope, *condition)?;
                 if let Some(message) = message {
-                    self.validate_expr(body, scope, *message)?;
+                    self.validate_expr(body, &mut stmt_scope, *message)?;
                 }
                 Ok(())
             }
@@ -228,7 +240,7 @@ impl Validator {
     ) -> ValidateResult<()> {
         match &body.exprs[expr_id] {
             Expr::FieldAccess { target, field } => {
-                self.validate_expr(body, scope, *target)?;
+                self.validate_receiver_expr(body, scope, *target)?;
                 self.validate_field_access(body, scope, *target, *field)
             }
             Expr::MethodCall {
@@ -237,7 +249,7 @@ impl Validator {
                 args,
             } => {
                 if let Some(target) = target {
-                    self.validate_expr(body, scope, *target)?;
+                    self.validate_receiver_expr(body, scope, *target)?;
                 }
                 for arg in args {
                     self.validate_expr(body, scope, *arg)?;
@@ -322,28 +334,64 @@ impl Validator {
             | Expr::StringLiteral(_)
             | Expr::NullLiteral
             | Expr::This
-            | Expr::Super
-            | Expr::Ident(_) => Ok(()),
+            | Expr::Super => Ok(()),
+            Expr::Ident(name) => self.validate_identifier(scope, *name),
         }
+    }
+
+    fn validate_receiver_expr(
+        &self,
+        body: &Body,
+        scope: &mut MethodScope,
+        expr_id: ExprId,
+    ) -> ValidateResult<()> {
+        if static_class_name(body, expr_id).is_some() {
+            return Ok(());
+        }
+        self.validate_expr(body, scope, expr_id)
+    }
+
+    fn validate_identifier(&self, scope: &MethodScope, name: Ustr) -> ValidateResult<()> {
+        if scope.locals.contains_key(&name) || self.fields.contains_key(&name) {
+            return Ok(());
+        }
+        Err(unresolved_variable_error(name, scope.line))
     }
 
     fn validate_field_access(
         &self,
         body: &Body,
-        _scope: &MethodScope,
+        scope: &MethodScope,
         target: ExprId,
         field: Ustr,
     ) -> ValidateResult<()> {
         if let Some(owner) = static_class_name(body, target) {
             if javac_call_resolver::resolve_static_field(owner, field.as_str()).is_none() {
-                return Err(format!(
-                    "cannot find symbol: variable {} in {}",
+                return Err(unresolved_field_error(
                     field,
-                    display_internal_name(owner)
+                    &display_internal_name(owner),
+                    scope.line,
                 ));
             }
+            return Ok(());
         }
-        Ok(())
+        if is_current_instance(body, target) {
+            if self.fields.contains_key(&field) {
+                return Ok(());
+            }
+            return Err(unresolved_field_error(
+                field,
+                &display_internal_name(self.class_name.as_str()),
+                scope.line,
+            ));
+        }
+
+        let receiver = self.expr_ty(body, scope, target);
+        Err(unresolved_field_error(
+            field,
+            &receiver.to_string(),
+            scope.line,
+        ))
     }
 
     fn validate_method_call(
@@ -368,18 +416,18 @@ impl Validator {
             }
 
             if is_current_instance(body, target) {
-                return self.validate_current_class_call(method, &arg_types, false);
+                return self.validate_current_class_call(method, &arg_types, false, scope.line);
             }
 
-            return Err(format!(
-                "cannot find symbol: method {}({}) in {}",
+            return Err(unresolved_method_error(
                 method,
-                display_args(&arg_types),
-                receiver
+                &arg_types,
+                &receiver.to_string(),
+                scope.line,
             ));
         }
 
-        self.validate_current_class_call(method, &arg_types, true)
+        self.validate_current_class_call(method, &arg_types, true, scope.line)
     }
 
     fn validate_current_class_call(
@@ -387,21 +435,22 @@ impl Validator {
         method: Ustr,
         arg_types: &[Ty],
         allow_static: bool,
+        line: Option<u16>,
     ) -> ValidateResult<()> {
         let Some(sig) = self.methods.get(&method) else {
-            return Err(format!(
-                "cannot find symbol: method {}({}) in {}",
+            return Err(unresolved_method_error(
                 method,
-                display_args(arg_types),
-                display_internal_name(self.class_name.as_str())
+                arg_types,
+                &display_internal_name(self.class_name.as_str()),
+                line,
             ));
         };
         let is_static = sig.access_flags & javac_classfile::ACC_STATIC != 0;
         if is_static && !allow_static {
-            return Err(format!(
+            return Err(BytecodeError::new(format!(
                 "non-static method {} cannot be called on this",
                 method
-            ));
+            )));
         }
         Ok(())
     }
@@ -493,7 +542,16 @@ impl Default for MethodScope {
     fn default() -> Self {
         Self {
             locals: HashMap::new(),
+            line: None,
         }
+    }
+}
+
+impl MethodScope {
+    fn with_line(&self, line: Option<u16>) -> Self {
+        let mut scope = self.clone();
+        scope.line = line;
+        scope
     }
 }
 
@@ -514,6 +572,18 @@ fn is_current_instance(body: &Body, expr_id: ExprId) -> bool {
     matches!(body.exprs[expr_id], Expr::This)
 }
 
+fn pattern_binding(body: &Body, expr_id: ExprId) -> Option<(Ustr, Ty)> {
+    match &body.exprs[expr_id] {
+        Expr::Instanceof {
+            ty,
+            binding: Some(name),
+            ..
+        } => Some((*name, ty.clone())),
+        Expr::Parens(inner) => pattern_binding(body, *inner),
+        _ => None,
+    }
+}
+
 fn is_string(ty: &Ty) -> bool {
     matches!(ty.erasure(), Ty::Class(name) if name.as_str() == "java/lang/String")
 }
@@ -527,4 +597,41 @@ fn display_args(args: &[Ty]) -> String {
 
 fn display_internal_name(name: &str) -> String {
     name.replace('/', ".")
+}
+
+fn unresolved_method_error(
+    method: Ustr,
+    arg_types: &[Ty],
+    receiver: &str,
+    line: Option<u16>,
+) -> BytecodeError {
+    BytecodeError::at_line(
+        format!(
+            "cannot find symbol: method {}({}) in {}",
+            method,
+            display_args(arg_types),
+            receiver
+        ),
+        line,
+    )
+    .with_needle(method.as_str())
+    .with_label("unresolved method call")
+    .with_help("check the method name and argument types")
+}
+
+fn unresolved_variable_error(name: Ustr, line: Option<u16>) -> BytecodeError {
+    BytecodeError::at_line(format!("cannot find symbol: variable {}", name), line)
+        .with_needle(name.as_str())
+        .with_label("unresolved variable")
+        .with_help("declare the variable before using it")
+}
+
+fn unresolved_field_error(field: Ustr, receiver: &str, line: Option<u16>) -> BytecodeError {
+    BytecodeError::at_line(
+        format!("cannot find symbol: variable {} in {}", field, receiver),
+        line,
+    )
+    .with_needle(field.as_str())
+    .with_label("unresolved field")
+    .with_help("check the field name or add a matching field")
 }
