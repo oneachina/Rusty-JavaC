@@ -57,6 +57,11 @@ impl Diagnostic {
         self
     }
 
+    pub fn with_primary_label(mut self, message: impl Into<String>) -> Self {
+        self.primary_label.message = message.into();
+        self
+    }
+
     pub fn with_secondary(mut self, message: impl Into<String>, range: TextRange) -> Self {
         self.secondary_labels.push(Label {
             message: message.into(),
@@ -112,3 +117,176 @@ impl IntoIterator for Diagnostics {
 }
 
 pub type Result<T> = std::result::Result<T, Vec<Diagnostic>>;
+
+#[derive(Debug, Clone, Copy)]
+pub struct SourceFile<'a> {
+    pub name: &'a str,
+    pub source: &'a str,
+}
+
+impl<'a> SourceFile<'a> {
+    pub fn new(name: &'a str, source: &'a str) -> Self {
+        Self { name, source }
+    }
+}
+
+pub fn render_diagnostics(file: SourceFile<'_>, diagnostics: &[Diagnostic]) -> Vec<String> {
+    diagnostics
+        .iter()
+        .map(|diagnostic| render_diagnostic(file, diagnostic))
+        .collect()
+}
+
+pub fn render_diagnostic(file: SourceFile<'_>, diagnostic: &Diagnostic) -> String {
+    let primary = primary_position(file.source, diagnostic.primary_label.range);
+    let header = diagnostic_header(diagnostic);
+    let line_number_width = primary.line.to_string().len().max(1);
+    let mut rendered = String::new();
+
+    rendered.push_str(&format!("{header}: {}\n", diagnostic.message));
+    rendered.push_str(&format!(
+        "{:>width$}--> {}:{}:{}\n",
+        "",
+        file.name,
+        primary.line,
+        primary.column,
+        width = line_number_width + 1
+    ));
+    rendered.push_str(&format!("{:>width$} |\n", "", width = line_number_width));
+    rendered.push_str(&format!(
+        "{:>width$} | {}\n",
+        primary.line,
+        primary.line_text,
+        width = line_number_width
+    ));
+    rendered.push_str(&format!(
+        "{:>width$} | {}{}",
+        "",
+        " ".repeat(primary.caret_start),
+        "^".repeat(primary.caret_len.max(1)),
+        width = line_number_width
+    ));
+
+    if !diagnostic.primary_label.message.is_empty() {
+        rendered.push(' ');
+        rendered.push_str(&diagnostic.primary_label.message);
+    }
+    rendered.push('\n');
+
+    for label in &diagnostic.secondary_labels {
+        let secondary = primary_position(file.source, label.range);
+        rendered.push_str(&format!(
+            "{:>width$} = note: {} at {}:{}\n",
+            "",
+            label.message,
+            secondary.line,
+            secondary.column,
+            width = line_number_width
+        ));
+    }
+
+    if let Some(help) = &diagnostic.help {
+        rendered.push_str(&format!(
+            "{:>width$} = help: {help}\n",
+            "",
+            width = line_number_width
+        ));
+    }
+
+    rendered
+}
+
+fn diagnostic_header(diagnostic: &Diagnostic) -> String {
+    let severity = match diagnostic.severity {
+        Severity::Error => "error",
+        Severity::Warning => "warning",
+        Severity::Note => "note",
+    };
+
+    match &diagnostic.code {
+        Some(code) => format!("{severity}[{code}]"),
+        None => severity.to_string(),
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PrimaryPosition {
+    line: usize,
+    column: usize,
+    line_text: String,
+    caret_start: usize,
+    caret_len: usize,
+}
+
+fn primary_position(source: &str, range: TextRange) -> PrimaryPosition {
+    let start = usize::try_from(u32::from(range.start()))
+        .unwrap_or(0)
+        .min(source.len());
+    let end = usize::try_from(u32::from(range.end()))
+        .unwrap_or(start)
+        .min(source.len());
+    let (line, line_start, line_end) = line_bounds(source, start);
+    let column = source[line_start..start].chars().count() + 1;
+    let line_text = source[line_start..line_end]
+        .trim_end_matches(['\r', '\n'])
+        .to_string();
+    let caret_start = source[line_start..start].chars().count();
+    let caret_end = if end <= line_end {
+        source[line_start..end].chars().count()
+    } else {
+        source[line_start..line_end].chars().count()
+    };
+
+    PrimaryPosition {
+        line,
+        column,
+        line_text,
+        caret_start,
+        caret_len: caret_end.saturating_sub(caret_start).max(1),
+    }
+}
+
+fn line_bounds(source: &str, offset: usize) -> (usize, usize, usize) {
+    let mut line = 1;
+    let mut line_start = 0;
+
+    for (index, ch) in source.char_indices() {
+        if index >= offset {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            line_start = index + 1;
+        }
+    }
+
+    let line_end = source[line_start..]
+        .find('\n')
+        .map(|relative| line_start + relative)
+        .unwrap_or(source.len());
+
+    (line, line_start, line_end)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use text_size::TextSize;
+
+    #[test]
+    fn renders_source_snippet_with_labels() {
+        let source = "class A {\n  void m() { int x = 1 }\n}\n";
+        let range = TextRange::new(TextSize::from(31), TextSize::from(32));
+        let diagnostic = Diagnostic::error("expected `;`", range)
+            .with_code("P0001")
+            .with_primary_label("insert `;` here")
+            .with_help("statements must end with `;`");
+
+        let rendered = render_diagnostic(SourceFile::new("A.java", source), &diagnostic);
+
+        assert!(rendered.contains("error[P0001]: expected `;`"));
+        assert!(rendered.contains("--> A.java:2:22"));
+        assert!(rendered.contains("^ insert `;` here"));
+        assert!(rendered.contains("= help: statements must end with `;`"));
+    }
+}

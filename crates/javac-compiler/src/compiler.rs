@@ -1,5 +1,6 @@
 use crate::config::CompilerConfig;
 use javac_ast::JavaSyntaxNode;
+use javac_diagnostics::{SourceFile, render_diagnostics};
 use javac_hir::hir::CompilationUnit;
 use std::path::{Path, PathBuf};
 
@@ -60,11 +61,15 @@ fn compile_source(filename: &str, source: &str) -> CompileResult<ClassArtifact> 
 fn parse_and_lower(filename: &str, source: &str) -> CompileResult<CompilationUnit> {
     let parse = javac_parser::Parser::parse(source);
     if !parse.errors.is_empty() {
-        return Err(parse
+        let diagnostics = parse
             .errors
             .iter()
-            .map(|e| format!("{}:{}: {}", filename, e.offset, e.message))
-            .collect());
+            .map(|error| error.diagnostic())
+            .collect::<Vec<_>>();
+        return Err(render_diagnostics(
+            SourceFile::new(filename, source),
+            &diagnostics,
+        ));
     }
 
     let root = JavaSyntaxNode::new_root(parse.green_node);

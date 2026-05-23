@@ -6,8 +6,10 @@ mod ty;
 mod type_decl;
 
 pub(crate) use javac_ast::JavaSyntaxKind;
+use javac_diagnostics::Diagnostic;
 use javac_lexer::Lexer;
 use rowan::GreenNodeBuilder;
+use text_size::{TextRange, TextSize};
 
 pub struct Parse {
     pub green_node: rowan::GreenNode,
@@ -18,6 +20,28 @@ pub struct Parse {
 pub struct ParseError {
     pub message: String,
     pub offset: usize,
+    pub len: usize,
+    pub label: String,
+    pub help: Option<String>,
+}
+
+impl ParseError {
+    pub fn diagnostic(&self) -> Diagnostic {
+        Diagnostic::error(self.message.clone(), self.range())
+            .with_code("P0001")
+            .with_primary_label(self.label.clone())
+            .with_help(
+                self.help
+                    .clone()
+                    .unwrap_or_else(|| "check the token at the highlighted position".to_string()),
+            )
+    }
+
+    fn range(&self) -> TextRange {
+        let start = TextSize::from(self.offset.min(u32::MAX as usize) as u32);
+        let end = TextSize::from((self.offset + self.len).min(u32::MAX as usize) as u32);
+        TextRange::new(start, end)
+    }
 }
 
 pub(crate) struct Token {
@@ -111,7 +135,7 @@ impl Parser {
         if self.at(k) {
             self.bump();
         } else {
-            self.err(format!("expected {:?}, got {:?}", k, self.kind()));
+            self.err_expected(k);
         }
     }
 
@@ -125,10 +149,15 @@ impl Parser {
     }
 
     pub(crate) fn err(&mut self, msg: impl Into<String>) {
-        let off = self.tokens.get(self.pos).map(|t| t.offset).unwrap_or(0);
+        let msg = msg.into();
+        let (offset, len) = self.current_span();
+        let found = token_display(self.kind());
         self.errors.push(ParseError {
-            message: msg.into(),
-            offset: off,
+            message: msg,
+            offset,
+            len,
+            label: format!("found {found}"),
+            help: None,
         });
     }
 
@@ -136,6 +165,151 @@ impl Parser {
         self.err(msg);
         self.bump();
     }
+
+    fn err_expected(&mut self, expected: JavaSyntaxKind) {
+        let (offset, len) = self.current_span();
+        let expected = token_display(expected);
+        let found = token_display(self.kind());
+        self.errors.push(ParseError {
+            message: format!("expected {expected}, found {found}"),
+            offset,
+            len,
+            label: format!("expected {expected} here"),
+            help: Some(format!("insert {expected} or remove {found}")),
+        });
+    }
+
+    fn current_span(&self) -> (usize, usize) {
+        self.tokens
+            .get(self.pos)
+            .map(|token| (token.offset, token.text.len().max(1)))
+            .unwrap_or_else(|| (self.source.len(), 0))
+    }
+}
+
+fn token_display(kind: JavaSyntaxKind) -> String {
+    use JavaSyntaxKind::*;
+    match kind {
+        AbstractKw => "`abstract`",
+        AssertKw => "`assert`",
+        BooleanKw => "`boolean`",
+        BreakKw => "`break`",
+        ByteKw => "`byte`",
+        CaseKw => "`case`",
+        CatchKw => "`catch`",
+        CharKw => "`char`",
+        ClassKw => "`class`",
+        ContinueKw => "`continue`",
+        DefaultKw => "`default`",
+        DoKw => "`do`",
+        DoubleKw => "`double`",
+        ElseKw => "`else`",
+        EnumKw => "`enum`",
+        ExtendsKw => "`extends`",
+        FinalKw => "`final`",
+        FinallyKw => "`finally`",
+        FloatKw => "`float`",
+        ForKw => "`for`",
+        IfKw => "`if`",
+        ImplementsKw => "`implements`",
+        ImportKw => "`import`",
+        InstanceofKw => "`instanceof`",
+        IntKw => "`int`",
+        InterfaceKw => "`interface`",
+        LongKw => "`long`",
+        NativeKw => "`native`",
+        NewKw => "`new`",
+        PackageKw => "`package`",
+        PrivateKw => "`private`",
+        ProtectedKw => "`protected`",
+        PublicKw => "`public`",
+        ReturnKw => "`return`",
+        ShortKw => "`short`",
+        StaticKw => "`static`",
+        StrictfpKw => "`strictfp`",
+        SuperKw => "`super`",
+        SwitchKw => "`switch`",
+        SynchronizedKw => "`synchronized`",
+        ThisKw => "`this`",
+        ThrowKw => "`throw`",
+        ThrowsKw => "`throws`",
+        TransientKw => "`transient`",
+        TryKw => "`try`",
+        VoidKw => "`void`",
+        VolatileKw => "`volatile`",
+        WhileKw => "`while`",
+        YieldKw => "`yield`",
+        RecordKw => "`record`",
+        SealedKw => "`sealed`",
+        NonSealedKw => "`non-sealed`",
+        PermitsKw => "`permits`",
+        VarKw => "`var`",
+        IntLiteral => "integer literal",
+        LongLiteral => "long literal",
+        FloatLiteral => "float literal",
+        DoubleLiteral => "double literal",
+        CharLiteral => "character literal",
+        StringLiteral => "string literal",
+        TextBlockLiteral => "text block literal",
+        TrueKw => "`true`",
+        FalseKw => "`false`",
+        NullKw => "`null`",
+        Ident => "identifier",
+        LBrace => "`{`",
+        RBrace => "`}`",
+        LBrack => "`[`",
+        RBrack => "`]`",
+        LParen => "`(`",
+        RParen => "`)`",
+        Semi => "`;`",
+        Comma => "`,`",
+        Dot => "`.`",
+        Ellipsis => "`...`",
+        At => "`@`",
+        ColonColon => "`::`",
+        Arrow => "`->`",
+        Eq => "`=`",
+        Gt => "`>`",
+        Lt => "`<`",
+        Bang => "`!`",
+        Tilde => "`~`",
+        Question => "`?`",
+        Colon => "`:`",
+        EqEq => "`==`",
+        Le => "`<=`",
+        Ge => "`>=`",
+        Neq => "`!=`",
+        Inc => "`++`",
+        Dec => "`--`",
+        AmpAmp => "`&&`",
+        PipePipe => "`||`",
+        Plus => "`+`",
+        Minus => "`-`",
+        Star => "`*`",
+        Slash => "`/`",
+        Amp => "`&`",
+        Pipe => "`|`",
+        Caret => "`^`",
+        Percent => "`%`",
+        LtLt => "`<<`",
+        GtGt => "`>>`",
+        GtGtGt => "`>>>`",
+        PlusEq => "`+=`",
+        MinusEq => "`-=`",
+        StarEq => "`*=`",
+        SlashEq => "`/=`",
+        AmpEq => "`&=`",
+        PipeEq => "`|=`",
+        CaretEq => "`^=`",
+        PercentEq => "`%=`",
+        LtLtEq => "`<<=`",
+        GtGtEq => "`>>=`",
+        GtGtGtEq => "`>>>=`",
+        Underscore => "`_`",
+        Error => "end of input",
+        _ => "syntax",
+    }
+    .to_string()
 }
 
 pub(crate) struct Marker {
