@@ -82,6 +82,9 @@ fn gen_method(
         ctx.begin_method(method);
         declare_method_locals(&mut mw, type_decl, method);
         gen_constructor_prelude(&mut mw, &ctx, method);
+        if method.name == INIT_METHOD {
+            emit_instance_field_initializers(&mut mw, &mut ctx, &type_decl.fields);
+        }
         crate::method_gen::gen_method_body(&mut mw, &mut ctx, &method.body, block);
         mw.visit_maxs(0, 0);
     }

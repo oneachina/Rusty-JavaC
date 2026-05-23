@@ -64,7 +64,7 @@ fn lower_top_level_types(
             JavaSyntaxKind::InterfaceDecl
             | JavaSyntaxKind::EnumDecl
             | JavaSyntaxKind::RecordDecl
-            | JavaSyntaxKind::AnnotationDecl => return Err(LowerError::UnsupportedTypeDeclaration),
+            | JavaSyntaxKind::AnnotationDecl => pending_flags = 0,
             _ => {}
         }
     }

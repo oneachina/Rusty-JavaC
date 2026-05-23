@@ -4,6 +4,12 @@ use javac_ty::{MethodSig, Ty};
 use std::collections::HashMap;
 use ustr::Ustr;
 
+#[derive(Clone)]
+pub struct FieldInfo {
+    pub ty: Ty,
+    pub access_flags: u16,
+}
+
 pub struct CodegenCtx<'a> {
     pub writer: &'a mut ClassFileWriter,
     pub class_name: Ustr,
@@ -12,7 +18,7 @@ pub struct CodegenCtx<'a> {
     pub next_local: u16,
     pub locals: HashMap<Ustr, u16>,
     pub local_types: HashMap<Ustr, Ty>,
-    pub fields: HashMap<Ustr, Ty>,
+    pub fields: HashMap<Ustr, FieldInfo>,
     pub methods: HashMap<Ustr, MethodSig>,
     pub break_labels: Vec<Label>,
     pub continue_labels: Vec<Label>,
@@ -42,7 +48,13 @@ impl<'a> CodegenCtx<'a> {
     pub fn set_fields(&mut self, fields: &[FieldDecl]) {
         self.fields.clear();
         for field in fields {
-            self.fields.insert(field.name, field.ty.clone());
+            self.fields.insert(
+                field.name,
+                FieldInfo {
+                    ty: field.ty.clone(),
+                    access_flags: field.access_flags,
+                },
+            );
         }
     }
 
@@ -96,7 +108,13 @@ impl<'a> CodegenCtx<'a> {
     }
 
     pub fn field_ty(&self, name: Ustr) -> Option<Ty> {
-        self.fields.get(&name).cloned()
+        self.fields.get(&name).map(|field| field.ty.clone())
+    }
+
+    pub fn field_is_static(&self, name: Ustr) -> bool {
+        self.fields
+            .get(&name)
+            .is_some_and(|field| field.access_flags & javac_classfile::ACC_STATIC != 0)
     }
 
     pub fn method_sig(&self, name: Ustr) -> Option<MethodSig> {

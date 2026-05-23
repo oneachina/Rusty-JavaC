@@ -6,9 +6,7 @@ use crate::lowering::stmt::lower_block;
 use crate::lowering::syntax::{first_ident, initializer_tokens, last_ident, source_line};
 use crate::lowering::types::lower_type_with_vars;
 use crate::lowering::{LowerError, LowerResult};
-use javac_ast::ast::{
-    AstNode, ClassBody, FieldDecl as AstFieldDecl, MethodDecl as AstMethodDecl,
-};
+use javac_ast::ast::{AstNode, ClassBody, FieldDecl as AstFieldDecl, MethodDecl as AstMethodDecl};
 use javac_ast::{JavaSyntaxKind, JavaSyntaxNode};
 use javac_ty::{MethodSig, Ty};
 use std::collections::HashSet;
@@ -53,11 +51,19 @@ pub(super) fn lower_class_members(
                 )?);
                 pending_flags = 0;
             }
-            JavaSyntaxKind::ConstructorDecl
-            | JavaSyntaxKind::ClassDecl
+            JavaSyntaxKind::ConstructorDecl => {
+                methods.push(lower_constructor_decl(
+                    &child,
+                    pending_flags,
+                    methods.len() as u32,
+                    class_type_params,
+                )?);
+                pending_flags = 0;
+            }
+            JavaSyntaxKind::ClassDecl
             | JavaSyntaxKind::InterfaceDecl
             | JavaSyntaxKind::EnumDecl
-            | JavaSyntaxKind::RecordDecl => return Err(LowerError::UnsupportedClassMember),
+            | JavaSyntaxKind::RecordDecl => pending_flags = 0,
             _ => {}
         }
     }
@@ -99,6 +105,44 @@ fn lower_field_decl(
     }
 
     Ok(fields)
+}
+
+fn lower_constructor_decl(
+    constructor: &JavaSyntaxNode,
+    access_flags: u16,
+    method_index: u32,
+    class_type_params: &[javac_ty::TypeParam],
+) -> LowerResult<MethodDecl> {
+    let type_vars = type_var_set(class_type_params, &[]);
+    let params = lower_method_params(constructor, &type_vars)?;
+    let signature = MethodSig::new(
+        Ustr::from("<init>"),
+        params.iter().map(|param| param.ty.clone()).collect(),
+        Ty::Void,
+    );
+    let mut body_builder = BodyBuilder::default();
+    define_params(&mut body_builder, &params);
+    let root_block = constructor
+        .children()
+        .find(|child| child.kind() == JavaSyntaxKind::MethodBody)
+        .and_then(|body| {
+            body.children()
+                .find(|child| child.kind() == JavaSyntaxKind::Block)
+        })
+        .map(|block| lower_block(&block, &mut body_builder))
+        .transpose()?;
+
+    Ok(MethodDecl {
+        id: HirId(method_index + 1),
+        name: Ustr::from("<init>"),
+        params,
+        signature,
+        access_flags,
+        source_line: Some(source_line(constructor)),
+        generic_signature: None,
+        body: body_builder.body,
+        root_block,
+    })
 }
 
 fn lower_method_decl(

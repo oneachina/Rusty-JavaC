@@ -52,6 +52,9 @@ pub(super) fn emit_pre_inc_dec(
             mw.visit_iinc_insn(slot, amount);
             mw.visit_var_insn(load_opcode(&ty), slot);
             return;
+        } else if ctx.field_is_static(*name) {
+            emit_static_field_pre_inc_dec(mw, ctx, *name, amount);
+            return;
         }
     }
 
@@ -70,6 +73,9 @@ pub(super) fn emit_post_inc_dec(
             let ty = ctx.local_ty(*name).unwrap_or(Ty::Int);
             mw.visit_var_insn(load_opcode(&ty), slot);
             mw.visit_iinc_insn(slot, amount);
+            return;
+        } else if ctx.field_is_static(*name) {
+            emit_static_field_post_inc_dec(mw, ctx, *name, amount);
             return;
         }
     }
@@ -101,6 +107,54 @@ fn emit_local_assign(
 
     dup_ty(mw, &ty);
     mw.visit_var_insn(store_opcode(&ty), slot);
+}
+
+fn emit_static_field_pre_inc_dec(
+    mw: &mut MethodWriter,
+    ctx: &CodegenCtx,
+    name: ustr::Ustr,
+    amount: i16,
+) {
+    let ty = ctx.field_ty(name).unwrap_or(Ty::Int);
+    mw.visit_field_insn(
+        opcodes::GETSTATIC,
+        ctx.class_name.as_str(),
+        name.as_str(),
+        &ty.descriptor(),
+    );
+    super::literals::emit_int(mw, amount as i64);
+    super::ops::emit_assign_op(mw, &AssignOp::Add, &ty);
+    dup_ty(mw, &ty);
+    mw.visit_field_insn(
+        opcodes::PUTSTATIC,
+        ctx.class_name.as_str(),
+        name.as_str(),
+        &ty.descriptor(),
+    );
+}
+
+fn emit_static_field_post_inc_dec(
+    mw: &mut MethodWriter,
+    ctx: &CodegenCtx,
+    name: ustr::Ustr,
+    amount: i16,
+) {
+    let ty = ctx.field_ty(name).unwrap_or(Ty::Int);
+    mw.visit_field_insn(
+        opcodes::GETSTATIC,
+        ctx.class_name.as_str(),
+        name.as_str(),
+        &ty.descriptor(),
+    );
+    dup_ty(mw, &ty);
+    super::literals::emit_int(mw, amount as i64);
+    super::ops::emit_assign_op(mw, &AssignOp::Add, &ty);
+    mw.visit_field_insn(
+        opcodes::PUTSTATIC,
+        ctx.class_name.as_str(),
+        name.as_str(),
+        &ty.descriptor(),
+    );
 }
 
 fn emit_instance_field_assign(
