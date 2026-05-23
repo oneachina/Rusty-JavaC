@@ -3,9 +3,9 @@ use crate::error::BytecodeError;
 use javac_classfile::ClassFileWriter;
 use javac_hir::hir::*;
 use javac_ty::Ty;
+use rust_asm::constants::V21;
 use rust_asm::opcodes;
 
-const JAVA_VERSION: u32 = 21;
 const OBJECT_CLASS: &str = "java/lang/Object";
 const INIT_METHOD: &str = "<init>";
 
@@ -28,7 +28,7 @@ fn gen_type_decl(writer: &mut ClassFileWriter, type_decl: &TypeDecl) {
     let interface_refs: Vec<_> = interfaces.iter().map(String::as_str).collect();
 
     writer.visit(
-        JAVA_VERSION,
+        V21,
         access_flags,
         &type_decl.name,
         Some(super_name.as_str()),

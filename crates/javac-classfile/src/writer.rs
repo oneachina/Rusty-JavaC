@@ -1,4 +1,3 @@
-use crate::version;
 use rust_asm::class_reader::{AttributeInfo, LocalVariable, read_class_file};
 use rust_asm::class_writer::{
     COMPUTE_FRAMES, COMPUTE_MAXS, ClassWriter as AsmClassWriter, FieldVisitor, MethodVisitor,
@@ -27,15 +26,14 @@ impl ClassFileWriter {
 
     pub fn visit(
         &mut self,
-        java_version: u32,
+        major_version: u16,
         access_flags: u16,
         name: &str,
         super_name: Option<&str>,
         interfaces: &[&str],
     ) {
-        let major = version::version_for_java(java_version);
         self.cw
-            .visit(major, 0, access_flags, name, super_name, interfaces);
+            .visit(major_version, 0, access_flags, name, super_name, interfaces);
     }
 
     pub fn visit_method(
