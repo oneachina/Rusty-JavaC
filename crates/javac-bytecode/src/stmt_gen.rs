@@ -214,6 +214,11 @@ fn emit_array_for_each(
 }
 
 fn emit_try_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, try_stmt: &TryStmt) {
+    if !try_stmt.resources.is_empty() && try_stmt.catches.is_empty() && try_stmt.finally.is_none() {
+        emit_try_with_resources_only(mw, ctx, body, try_stmt);
+        return;
+    }
+
     let resources = emit_try_resources(mw, ctx, body, &try_stmt.resources);
     let start_label = Label::new();
     let end_label = Label::new();
@@ -281,6 +286,46 @@ fn emit_try_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, try_s
     mw.visit_label(after_label);
 }
 
+fn emit_try_with_resources_only(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    body: &Body,
+    try_stmt: &TryStmt,
+) {
+    let resources = emit_try_resources(mw, ctx, body, &try_stmt.resources);
+    let start_label = Label::new();
+    let end_label = Label::new();
+    let primary_handler = Label::new();
+    let rethrow_label = Label::new();
+    let after_label = Label::new();
+
+    mw.visit_try_catch_block(
+        start_label,
+        end_label,
+        primary_handler,
+        Some("java/lang/Throwable"),
+    );
+
+    mw.visit_label(start_label);
+    for stmt in &try_stmt.body.stmts {
+        gen_stmt(mw, ctx, body, *stmt);
+    }
+    mw.visit_label(end_label);
+    emit_resource_closes_unchecked(mw, &resources);
+    mw.visit_jump_insn(opcodes::GOTO, after_label);
+
+    mw.visit_label(primary_handler);
+    let throwable = Ty::Class(ustr::Ustr::from("java/lang/Throwable"));
+    let primary_slot = ctx.alloc_temp(&throwable);
+    mw.visit_var_insn(opcodes::ASTORE, primary_slot);
+    emit_resource_closes_suppressed(mw, ctx, &resources, primary_slot);
+    mw.visit_label(rethrow_label);
+    mw.visit_var_insn(opcodes::ALOAD, primary_slot);
+    mw.visit_insn(opcodes::ATHROW);
+
+    mw.visit_label(after_label);
+}
+
 struct ResourceLocal {
     ty: Ty,
     slot: u16,
@@ -336,19 +381,74 @@ fn emit_cleanup(
 
 fn emit_resource_closes(mw: &mut MethodWriter, resources: &[ResourceLocal]) {
     for resource in resources.iter().rev() {
-        let end_label = Label::new();
-        mw.visit_var_insn(load_opcode(&resource.ty), resource.slot);
-        mw.visit_jump_insn(opcodes::IFNULL, end_label);
-        mw.visit_var_insn(load_opcode(&resource.ty), resource.slot);
+        emit_resource_close_if_present(mw, resource);
+    }
+}
+
+fn emit_resource_closes_unchecked(mw: &mut MethodWriter, resources: &[ResourceLocal]) {
+    for resource in resources.iter().rev() {
+        emit_resource_close(mw, resource);
+    }
+}
+
+fn emit_resource_closes_suppressed(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    resources: &[ResourceLocal],
+    primary_slot: u16,
+) {
+    let throwable = Ty::Class(ustr::Ustr::from("java/lang/Throwable"));
+    for resource in resources.iter().rev() {
+        let close_start = Label::new();
+        let close_end = Label::new();
+        let close_handler = Label::new();
+        let next_resource = Label::new();
+
+        mw.visit_try_catch_block(
+            close_start,
+            close_end,
+            close_handler,
+            Some("java/lang/Throwable"),
+        );
+
+        mw.visit_label(close_start);
+        emit_resource_close(mw, resource);
+        mw.visit_label(close_end);
+        mw.visit_jump_insn(opcodes::GOTO, next_resource);
+
+        mw.visit_label(close_handler);
+        let suppressed_slot = ctx.alloc_temp(&throwable);
+        mw.visit_var_insn(opcodes::ASTORE, suppressed_slot);
+        mw.visit_var_insn(opcodes::ALOAD, primary_slot);
+        mw.visit_var_insn(opcodes::ALOAD, suppressed_slot);
         mw.visit_method_insn(
             opcodes::INVOKEVIRTUAL,
-            &resource.ty.internal_name(),
-            "close",
-            "()V",
+            "java/lang/Throwable",
+            "addSuppressed",
+            "(Ljava/lang/Throwable;)V",
             false,
         );
-        mw.visit_label(end_label);
+        mw.visit_label(next_resource);
     }
+}
+
+fn emit_resource_close(mw: &mut MethodWriter, resource: &ResourceLocal) {
+    mw.visit_var_insn(load_opcode(&resource.ty), resource.slot);
+    mw.visit_method_insn(
+        opcodes::INVOKEVIRTUAL,
+        &resource.ty.internal_name(),
+        "close",
+        "()V",
+        false,
+    );
+}
+
+fn emit_resource_close_if_present(mw: &mut MethodWriter, resource: &ResourceLocal) {
+    let end_label = Label::new();
+    mw.visit_var_insn(load_opcode(&resource.ty), resource.slot);
+    mw.visit_jump_insn(opcodes::IFNULL, end_label);
+    emit_resource_close(mw, resource);
+    mw.visit_label(end_label);
 }
 
 fn emit_block(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, block: &Block) {
