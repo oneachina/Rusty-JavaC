@@ -4,13 +4,14 @@ use crate::lowering::types::{class_type_from_name, is_string_ty};
 use crate::lowering::{LowerError, LowerResult};
 use javac_ast::JavaSyntaxKind;
 use javac_ty::Ty;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use ustr::Ustr;
 
 #[derive(Default)]
 pub(super) struct BodyBuilder {
     pub body: Body,
     local_scopes: Vec<HashMap<Ustr, Ty>>,
+    pattern_names: HashSet<Ustr>,
 }
 
 impl BodyBuilder {
@@ -41,11 +42,32 @@ impl BodyBuilder {
         }
     }
 
+    pub(super) fn define_pattern_local(&mut self, name: Ustr, ty: Ty) {
+        self.pattern_names.insert(name);
+        self.define_local(name, ty);
+    }
+
     pub(super) fn local_ty(&self, name: Ustr) -> Option<Ty> {
         self.local_scopes
             .iter()
             .rev()
             .find_map(|scope| scope.get(&name).cloned())
+    }
+
+    fn pattern_name_is_out_of_scope(&self, name: Ustr) -> bool {
+        self.pattern_names.contains(&name) && self.local_ty(name).is_none()
+    }
+
+    pub(super) fn pattern_binding(&self, expr_id: ExprId) -> Option<(Ustr, Ty, ExprId)> {
+        match &self.body.exprs[expr_id] {
+            Expr::Instanceof {
+                expr,
+                ty,
+                binding: Some(name),
+            } => Some((*name, ty.clone(), *expr)),
+            Expr::Parens(inner) => self.pattern_binding(*inner),
+            _ => None,
+        }
     }
 
     pub(super) fn lower_expr_tokens(
@@ -142,7 +164,16 @@ impl ExprLowerer<'_, '_> {
                 }
                 self.pos += 1;
                 let ty = self.parse_type_name()?;
-                left = self.body.alloc_expr(Expr::Instanceof { expr: left, ty });
+                let binding = if self.peek_kind() == Some(JavaSyntaxKind::Ident) {
+                    Some(Ustr::from(&self.expect_ident()?))
+                } else {
+                    None
+                };
+                left = self.body.alloc_expr(Expr::Instanceof {
+                    expr: left,
+                    ty,
+                    binding,
+                });
                 continue;
             }
 
@@ -293,7 +324,7 @@ impl ExprLowerer<'_, '_> {
             let target = if segments.is_empty() {
                 None
             } else {
-                Some(self.build_path_expr(&segments))
+                Some(self.build_path_expr(&segments)?)
             };
             return Ok(self.body.alloc_expr(Expr::MethodCall {
                 target,
@@ -302,7 +333,7 @@ impl ExprLowerer<'_, '_> {
             }));
         }
 
-        Ok(self.build_path_expr(&segments))
+        self.build_path_expr(&segments)
     }
 
     fn parse_args(&mut self) -> LowerResult<Vec<ExprId>> {
@@ -323,15 +354,20 @@ impl ExprLowerer<'_, '_> {
         Ok(args)
     }
 
-    fn build_path_expr(&mut self, segments: &[String]) -> ExprId {
-        let mut expr = self.body.alloc_expr(Expr::Ident(Ustr::from(&segments[0])));
+    fn build_path_expr(&mut self, segments: &[String]) -> LowerResult<ExprId> {
+        let first = Ustr::from(&segments[0]);
+        if self.body.pattern_name_is_out_of_scope(first) {
+            return Err(LowerError::PatternVariableOutOfScope(segments[0].clone()));
+        }
+
+        let mut expr = self.body.alloc_expr(Expr::Ident(first));
         for segment in &segments[1..] {
             expr = self.body.alloc_expr(Expr::FieldAccess {
                 target: expr,
                 field: Ustr::from(segment),
             });
         }
-        expr
+        Ok(expr)
     }
 
     fn peek(&self) -> Option<&ExprToken> {

@@ -129,9 +129,18 @@ fn lower_if_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<S
     let condition = body
         .lower_expr_tokens(&tokens_in_first_parens(stmt)?)?
         .ok_or(LowerError::UnsupportedExpression)?;
+    let pattern_binding = body.pattern_binding(condition);
     let mut branches = stmt.children().filter(is_statement_node);
     let then_node = branches.next().ok_or(LowerError::UnsupportedExpression)?;
-    let then_branch = lower_stmt_as_branch(&then_node, body)?;
+    let then_branch = if let Some((name, ty, _)) = pattern_binding {
+        body.enter_scope();
+        body.define_pattern_local(name, ty);
+        let branch = lower_stmt_as_branch(&then_node, body)?;
+        body.exit_scope();
+        branch
+    } else {
+        lower_stmt_as_branch(&then_node, body)?
+    };
     let else_branch = branches
         .next()
         .map(|node| lower_stmt_as_branch(&node, body))

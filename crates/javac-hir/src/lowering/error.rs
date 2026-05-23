@@ -14,6 +14,7 @@ pub enum LowerError {
     MissingMethodName,
     MissingType,
     UnsupportedExpression,
+    PatternVariableOutOfScope(String),
 }
 
 impl fmt::Display for LowerError {
@@ -29,6 +30,9 @@ impl fmt::Display for LowerError {
             LowerError::MissingMethodName => "method declaration is missing a name",
             LowerError::MissingType => "type syntax is missing",
             LowerError::UnsupportedExpression => "unsupported expression",
+            LowerError::PatternVariableOutOfScope(name) => {
+                return write!(f, "pattern variable `{name}` is not in scope");
+            }
         };
         f.write_str(message)
     }

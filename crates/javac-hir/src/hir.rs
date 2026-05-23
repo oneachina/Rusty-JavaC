@@ -247,6 +247,7 @@ pub enum Expr {
     Instanceof {
         expr: ExprId,
         ty: Ty,
+        binding: Option<Ustr>,
     },
 
     Assign {

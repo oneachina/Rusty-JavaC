@@ -1,12 +1,17 @@
-use crate::parser::{Parser, JavaSyntaxKind};
-use crate::parser::{ty, type_decl, stmt};
+use crate::parser::{stmt, ty, type_decl};
+use crate::parser::{JavaSyntaxKind, Parser};
 
-pub(crate) fn expr(p: &mut Parser) { assignment_expr(p); }
+pub(crate) fn expr(p: &mut Parser) {
+    assignment_expr(p);
+}
 
 pub(crate) fn assignment_expr(p: &mut Parser) {
     use JavaSyntaxKind::*;
     ternary_expr(p);
-    if p.at_any(&[Eq, PlusEq, MinusEq, StarEq, SlashEq, AmpEq, PipeEq, CaretEq, PercentEq, LtLtEq, GtGtEq, GtGtGtEq]) {
+    if p.at_any(&[
+        Eq, PlusEq, MinusEq, StarEq, SlashEq, AmpEq, PipeEq, CaretEq, PercentEq, LtLtEq, GtGtEq,
+        GtGtGtEq,
+    ]) {
         p.bump();
         assignment_expr(p);
     }
@@ -26,9 +31,19 @@ pub(crate) fn binary_expr(p: &mut Parser, min_prec: usize) {
     unary_expr(p);
     loop {
         let prec = binop_prec(p);
-        if prec == 0 || prec < min_prec { break; }
+        if prec == 0 || prec < min_prec {
+            break;
+        }
+        let op = p.kind();
         p.bump();
-        binary_expr(p, prec + 1);
+        if op == JavaSyntaxKind::InstanceofKw {
+            ty::type_(p);
+            if p.at(JavaSyntaxKind::Ident) {
+                p.bump();
+            }
+        } else {
+            binary_expr(p, prec + 1);
+        }
     }
 }
 
@@ -52,10 +67,21 @@ pub(crate) fn binop_prec(p: &Parser) -> usize {
 pub(crate) fn unary_expr(p: &mut Parser) {
     use JavaSyntaxKind::*;
     match p.kind() {
-        Plus | Minus => { p.bump(); unary_expr(p); }
-        Inc | Dec => { p.bump(); unary_expr(p); }
-        Tilde | Bang => { p.bump(); unary_expr(p); }
-        _ => { cast_or_postfix_expr(p); }
+        Plus | Minus => {
+            p.bump();
+            unary_expr(p);
+        }
+        Inc | Dec => {
+            p.bump();
+            unary_expr(p);
+        }
+        Tilde | Bang => {
+            p.bump();
+            unary_expr(p);
+        }
+        _ => {
+            cast_or_postfix_expr(p);
+        }
     }
 }
 
@@ -79,12 +105,17 @@ pub(crate) fn cast_or_postfix_expr(p: &mut Parser) {
 
 pub(crate) fn is_cast(p: &mut Parser) -> bool {
     use JavaSyntaxKind::*;
-    if !p.at(LParen) { return false; }
+    if !p.at(LParen) {
+        return false;
+    }
     let mut i = p.pos + 1;
-    let primitives = [IntKw, LongKw, ShortKw, ByteKw, CharKw, FloatKw, DoubleKw, BooleanKw];
+    let primitives = [
+        IntKw, LongKw, ShortKw, ByteKw, CharKw, FloatKw, DoubleKw, BooleanKw,
+    ];
     if i < p.tokens.len() && primitives.contains(&p.tokens[i].kind) {
         i += 1;
-        while i + 1 < p.tokens.len() && p.tokens[i].kind == LBrack && p.tokens[i + 1].kind == RBrack {
+        while i + 1 < p.tokens.len() && p.tokens[i].kind == LBrack && p.tokens[i + 1].kind == RBrack
+        {
             i += 2;
         }
         return i < p.tokens.len() && p.tokens[i].kind == RParen;
@@ -97,15 +128,26 @@ pub(crate) fn is_cast(p: &mut Parser) -> bool {
                 while i < p.tokens.len() {
                     match p.tokens[i].kind {
                         Lt => depth += 1,
-                        Gt => { depth -= 1; if depth == 0 { i += 1; break; } }
+                        Gt => {
+                            depth -= 1;
+                            if depth == 0 {
+                                i += 1;
+                                break;
+                            }
+                        }
                         _ => {}
                     }
                     i += 1;
                 }
             }
-            if i < p.tokens.len() && p.tokens[i].kind == Dot { i += 1; } else { break; }
+            if i < p.tokens.len() && p.tokens[i].kind == Dot {
+                i += 1;
+            } else {
+                break;
+            }
         }
-        while i + 1 < p.tokens.len() && p.tokens[i].kind == LBrack && p.tokens[i + 1].kind == RBrack {
+        while i + 1 < p.tokens.len() && p.tokens[i].kind == LBrack && p.tokens[i + 1].kind == RBrack
+        {
             i += 2;
         }
         if i < p.tokens.len() && p.tokens[i].kind == RParen {
@@ -132,8 +174,13 @@ pub(crate) fn postfix_suffix(p: &mut Parser) {
                 expr(p);
                 p.expect(RBrack);
             }
-            LParen => { argument_list(p); }
-            Inc | Dec => { p.bump(); break; }
+            LParen => {
+                argument_list(p);
+            }
+            Inc | Dec => {
+                p.bump();
+                break;
+            }
             _ => break,
         }
     }
@@ -142,15 +189,28 @@ pub(crate) fn postfix_suffix(p: &mut Parser) {
 pub(crate) fn primary_expr(p: &mut Parser) {
     use JavaSyntaxKind::*;
     match p.kind() {
-        IntLiteral | LongLiteral | FloatLiteral | DoubleLiteral
-        | CharLiteral | StringLiteral | TextBlockLiteral
-        | TrueKw | FalseKw | NullKw => {
-            let m = p.start(); p.bump(); m.complete(p, Literal);
+        IntLiteral | LongLiteral | FloatLiteral | DoubleLiteral | CharLiteral | StringLiteral
+        | TextBlockLiteral | TrueKw | FalseKw | NullKw => {
+            let m = p.start();
+            p.bump();
+            m.complete(p, Literal);
         }
-        ThisKw => { let m = p.start(); p.bump(); m.complete(p, ThisExpr); }
-        SuperKw => { let m = p.start(); p.bump(); m.complete(p, SuperExpr); }
-        NewKw => { new_expr(p); }
-        SwitchKw => { stmt::switch_expr(p); }
+        ThisKw => {
+            let m = p.start();
+            p.bump();
+            m.complete(p, ThisExpr);
+        }
+        SuperKw => {
+            let m = p.start();
+            p.bump();
+            m.complete(p, SuperExpr);
+        }
+        NewKw => {
+            new_expr(p);
+        }
+        SwitchKw => {
+            stmt::switch_expr(p);
+        }
         LParen => {
             let m = p.start();
             p.bump();
@@ -158,8 +218,12 @@ pub(crate) fn primary_expr(p: &mut Parser) {
             p.expect(RParen);
             m.complete(p, ParenExpr);
         }
-        Ident => { name_expr(p); }
-        _ => { p.err_and_bump(format!("unexpected token in expression: {:?}", p.kind())); }
+        Ident => {
+            name_expr(p);
+        }
+        _ => {
+            p.err_and_bump(format!("unexpected token in expression: {:?}", p.kind()));
+        }
     }
 }
 
@@ -182,16 +246,24 @@ pub(crate) fn new_expr(p: &mut Parser) {
     ty::type_no_array(p);
     if p.at(LBrack) {
         p.bump();
-        if !p.at(RBrack) { expr(p); }
+        if !p.at(RBrack) {
+            expr(p);
+        }
         p.expect(RBrack);
         while p.eat(LBrack) {
-            if !p.at(RBrack) { expr(p); }
+            if !p.at(RBrack) {
+                expr(p);
+            }
             p.expect(RBrack);
         }
-        if p.at(LBrace) { array_init(p); }
+        if p.at(LBrace) {
+            array_init(p);
+        }
     } else {
         argument_list(p);
-        if p.at(LBrace) { type_decl::class_body(p); }
+        if p.at(LBrace) {
+            type_decl::class_body(p);
+        }
     }
     m.complete(p, NewExpr);
 }
@@ -202,7 +274,9 @@ pub(crate) fn array_init(p: &mut Parser) {
     p.expect(LBrace);
     while !p.at(RBrace) && p.kind() != Error {
         expr(p);
-        if !p.eat(Comma) { break; }
+        if !p.eat(Comma) {
+            break;
+        }
     }
     p.eat(Comma);
     p.expect(RBrace);
@@ -214,12 +288,16 @@ pub(crate) fn argument_list(p: &mut Parser) {
     p.expect(LParen);
     if !p.at(RParen) {
         expr(p);
-        while p.eat(Comma) { expr(p); }
+        while p.eat(Comma) {
+            expr(p);
+        }
     }
     p.expect(RParen);
 }
 
 pub(crate) fn expr_list(p: &mut Parser) {
     expr(p);
-    while p.eat(JavaSyntaxKind::Comma) { expr(p); }
+    while p.eat(JavaSyntaxKind::Comma) {
+        expr(p);
+    }
 }

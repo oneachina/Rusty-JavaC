@@ -78,7 +78,7 @@ pub fn gen_expr(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, expr_i
         }
         Expr::PostInc(target) => assign::emit_post_inc_dec(mw, ctx, body, *target, 1),
         Expr::PostDec(target) => assign::emit_post_inc_dec(mw, ctx, body, *target, -1),
-        Expr::Instanceof { expr, ty } => {
+        Expr::Instanceof { expr, ty, .. } => {
             gen_expr(mw, ctx, body, *expr);
             mw.visit_type_insn(opcodes::INSTANCEOF, &ty.internal_name());
         }

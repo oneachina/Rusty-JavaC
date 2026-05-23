@@ -16,12 +16,12 @@ public class ModernJavaFeatures {
         var flag = true;
     }
 
-    String patternMatch(Object obj) {
-        if (obj instanceof String) {
-            return "string";
+    Object patternMatch(Object obj) {
+        if (obj instanceof String text) {
+            return text;
         }
-        if (obj instanceof Integer) {
-            return "integer";
+        if (obj instanceof Integer number) {
+            return number;
         }
         return "unknown";
     }

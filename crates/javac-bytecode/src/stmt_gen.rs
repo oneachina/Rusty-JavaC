@@ -49,8 +49,12 @@ pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_i
             let else_label = Label::new();
             let end_label = Label::new();
             let then_exits = stmt_definitely_exits(body, *then_branch);
+            let pattern_binding = pattern_binding(body, *condition);
             crate::expr_gen::gen_expr(mw, ctx, body, *condition);
             mw.visit_jump_insn(opcodes::IFEQ, else_label);
+            if let Some(binding) = pattern_binding {
+                emit_pattern_binding(mw, ctx, body, binding);
+            }
             gen_stmt(mw, ctx, body, *then_branch);
             if !then_exits {
                 mw.visit_jump_insn(opcodes::GOTO, end_label);
@@ -153,6 +157,49 @@ fn emit_line_number(mw: &mut MethodWriter, body: &Body, stmt_id: StmtId) {
         mw.visit_label(label);
         mw.visit_line_number(line, label);
     }
+}
+
+struct PatternBinding {
+    name: ustr::Ustr,
+    ty: Ty,
+    source: ExprId,
+}
+
+fn pattern_binding(body: &Body, expr_id: ExprId) -> Option<PatternBinding> {
+    match &body.exprs[expr_id] {
+        Expr::Instanceof {
+            expr,
+            ty,
+            binding: Some(name),
+        } => Some(PatternBinding {
+            name: *name,
+            ty: ty.clone(),
+            source: *expr,
+        }),
+        Expr::Parens(inner) => pattern_binding(body, *inner),
+        _ => None,
+    }
+}
+
+fn emit_pattern_binding(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    body: &Body,
+    binding: PatternBinding,
+) {
+    crate::expr_gen::gen_expr(mw, ctx, body, binding.source);
+    crate::expr_gen::coerce(
+        mw,
+        &crate::expr_gen::expr_ty(ctx, body, binding.source),
+        &binding.ty,
+    );
+    let slot = ctx.alloc_local(binding.name, binding.ty.clone());
+    mw.visit_local_variable(
+        binding.name.as_str(),
+        &binding.ty.erasure().descriptor(),
+        slot,
+    );
+    mw.visit_var_insn(crate::local_var::store_opcode(&binding.ty), slot);
 }
 
 fn return_opcode(ty: &Ty) -> u8 {
