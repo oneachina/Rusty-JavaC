@@ -13,6 +13,8 @@ pub fn gen_class(unit: &CompilationUnit) -> Result<Vec<u8>, String> {
         .type_decls
         .first()
         .ok_or_else(|| "no type declarations".to_string())?;
+    crate::validation::validate_type_decl(type_decl)?;
+
     let mut writer = ClassFileWriter::new();
     gen_type_decl(&mut writer, type_decl);
     writer.to_bytes()
