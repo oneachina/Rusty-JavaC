@@ -13,6 +13,18 @@ pub fn class_name(simple_name: &str) -> Option<&'static str> {
     }
 }
 
+pub fn internal_class_name(internal_name: &str) -> Option<&'static str> {
+    match internal_name {
+        SYSTEM_CLASS => Some(SYSTEM_CLASS),
+        PRINT_STREAM_CLASS => Some(PRINT_STREAM_CLASS),
+        _ => None,
+    }
+}
+
+pub fn package_name(package: &str) -> bool {
+    package == "java/lang" || package == "java/io"
+}
+
 pub fn resolve_static_field(owner: &str, name: &str) -> Option<FieldRef> {
     match (owner, name) {
         (SYSTEM_CLASS, "out") => Some(FieldRef {

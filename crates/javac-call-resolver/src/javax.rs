@@ -5,6 +5,14 @@ pub fn class_name(_simple_name: &str) -> Option<&'static str> {
     None
 }
 
+pub fn internal_class_name(_internal_name: &str) -> Option<&'static str> {
+    None
+}
+
+pub fn package_name(_package: &str) -> bool {
+    false
+}
+
 pub fn resolve_static_field(_owner: &str, _name: &str) -> Option<FieldRef> {
     None
 }
