@@ -30,4 +30,8 @@ public class GuessNumberGame {
     static int pickAnswer(Random random) {
         return random.nextInt(100) + 1;
     }
+
+    static boolean wantsAnotherRound(String choice) {
+        return choice.equalsIgnoreCase("y");
+    }
 }
