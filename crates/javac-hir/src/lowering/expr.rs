@@ -67,6 +67,145 @@ impl BodyBuilder {
         self.pattern_names.contains(&name) && self.local_ty(name).is_none()
     }
 
+    pub(super) fn resolve_lambda_target_types(&mut self, method_return_ty: &Ty) {
+        let mut targets: Vec<(ExprId, Ty)> = Vec::new();
+        for (_, stmt) in self.body.stmts.iter() {
+            self.collect_lambda_targets(stmt, method_return_ty, &mut targets);
+        }
+        for (expr_id, ty) in targets {
+            if let Expr::Lambda { target_ty: t, .. } = &mut self.body.exprs[expr_id] {
+                *t = Some(ty);
+            }
+        }
+    }
+
+    fn collect_lambda_targets(
+        &self,
+        stmt: &Stmt,
+        method_return_ty: &Ty,
+        targets: &mut Vec<(ExprId, Ty)>,
+    ) {
+        match stmt {
+            Stmt::LocalVar(decl) => {
+                if let Some(init) = decl.initializer {
+                    self.push_lambda_target(init, &decl.ty, targets);
+                }
+            }
+            Stmt::Return(expr) => {
+                if let Some(expr_id) = expr {
+                    self.push_lambda_target(*expr_id, method_return_ty, targets);
+                }
+            }
+            Stmt::Expr(expr_id) => {
+                self.collect_expr_lambda_targets(*expr_id, targets);
+            }
+            Stmt::Block(block) => {
+                for &s in &block.stmts {
+                    self.collect_lambda_targets(&self.body.stmts[s], method_return_ty, targets);
+                }
+            }
+            Stmt::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.collect_lambda_targets(
+                    &self.body.stmts[*then_branch],
+                    method_return_ty,
+                    targets,
+                );
+                if let Some(eb) = else_branch {
+                    self.collect_lambda_targets(&self.body.stmts[*eb], method_return_ty, targets);
+                }
+            }
+            Stmt::For { body, .. }
+            | Stmt::ForEach { body, .. }
+            | Stmt::While { body, .. }
+            | Stmt::Do { body, .. } => {
+                self.collect_lambda_targets(&self.body.stmts[*body], method_return_ty, targets);
+            }
+            Stmt::Labeled { body, .. } => {
+                self.collect_lambda_targets(&self.body.stmts[*body], method_return_ty, targets);
+            }
+            Stmt::Synchronized(_, block) => {
+                for &s in &block.stmts {
+                    self.collect_lambda_targets(&self.body.stmts[s], method_return_ty, targets);
+                }
+            }
+            Stmt::Try(try_stmt) => {
+                for &s in &try_stmt.body.stmts {
+                    self.collect_lambda_targets(&self.body.stmts[s], method_return_ty, targets);
+                }
+                for catch in &try_stmt.catches {
+                    for &s in &catch.body.stmts {
+                        self.collect_lambda_targets(&self.body.stmts[s], method_return_ty, targets);
+                    }
+                }
+                if let Some(finally) = &try_stmt.finally {
+                    for &s in &finally.stmts {
+                        self.collect_lambda_targets(&self.body.stmts[s], method_return_ty, targets);
+                    }
+                }
+            }
+            Stmt::Switch { cases, .. } => {
+                for case in cases {
+                    let stmts = match case {
+                        SwitchCase::Case { body, .. } | SwitchCase::Default { body, .. } => body,
+                    };
+                    for &s in stmts {
+                        self.collect_lambda_targets(&self.body.stmts[s], method_return_ty, targets);
+                    }
+                }
+            }
+            Stmt::Assert {
+                condition: _,
+                message,
+            } => {
+                if let Some(msg) = message {
+                    self.collect_expr_lambda_targets(*msg, targets);
+                }
+            }
+            Stmt::Throw(expr_id) | Stmt::Yield(expr_id) => {
+                self.collect_expr_lambda_targets(*expr_id, targets);
+            }
+            Stmt::Empty | Stmt::Break(_) | Stmt::Continue(_) => {}
+        }
+    }
+
+    fn collect_expr_lambda_targets(&self, expr_id: ExprId, targets: &mut Vec<(ExprId, Ty)>) {
+        match &self.body.exprs[expr_id] {
+            Expr::Assign { target, value, .. } => {
+                let target_ty = self.expr_ty(*target);
+                self.push_lambda_target(*value, &target_ty, targets);
+            }
+            Expr::MethodCall {
+                target: _,
+                method: _,
+                args: _,
+            } => {}
+            Expr::Parens(inner) => {
+                self.collect_expr_lambda_targets(*inner, targets);
+            }
+            _ => {}
+        }
+    }
+
+    fn push_lambda_target(&self, expr_id: ExprId, target_ty: &Ty, targets: &mut Vec<(ExprId, Ty)>) {
+        let unwrapped = self.unwrap_parens(expr_id);
+        if matches!(self.body.exprs[unwrapped], Expr::Lambda { .. }) {
+            targets.push((unwrapped, target_ty.clone()));
+        }
+    }
+
+    fn unwrap_parens(&self, mut expr_id: ExprId) -> ExprId {
+        loop {
+            match &self.body.exprs[expr_id] {
+                Expr::Parens(inner) => expr_id = *inner,
+                _ => break expr_id,
+            }
+        }
+    }
+
     pub(super) fn pattern_binding(&self, expr_id: ExprId) -> Option<(Ustr, Ty, ExprId)> {
         match &self.body.exprs[expr_id] {
             Expr::Instanceof {
@@ -451,23 +590,27 @@ impl ExprLowerer<'_, '_> {
                 Ok(self.body.alloc_expr(Expr::Super))
             }
             JavaSyntaxKind::NewKw => self.parse_new_expr(),
-            JavaSyntaxKind::Ident
-                if self
+            JavaSyntaxKind::Ident => {
+                let is_lambda = self
                     .tokens
                     .get(self.pos + 1)
-                    .is_some_and(|t| t.kind == JavaSyntaxKind::Arrow) =>
-            {
-                self.pos += 1;
-                let name = Ustr::from(token.text.as_str());
-                self.pos += 1;
-                let body_expr = self.parse_expr()?;
-                let params = vec![LambdaParam { name, ty: None }];
-                Ok(self.body.alloc_expr(Expr::Lambda {
-                    params,
-                    body: LambdaBody::Expr(body_expr),
-                }))
-            }
-            JavaSyntaxKind::Ident => {
+                    .is_some_and(|t| t.kind == JavaSyntaxKind::Arrow);
+                if is_lambda {
+                    self.pos += 1;
+                    let name = Ustr::from(token.text.as_str());
+                    self.pos += 1;
+                    self.body.define_local(name, Ty::object());
+                    let body_expr = self.parse_expr()?;
+                    let params = vec![LambdaParam {
+                        name,
+                        ty: Some(Ty::object()),
+                    }];
+                    return Ok(self.body.alloc_expr(Expr::Lambda {
+                        params,
+                        body: LambdaBody::Expr(body_expr),
+                        target_ty: None,
+                    }));
+                }
                 let name = self.expect_ident()?;
                 let name = Ustr::from(&name);
                 if self.body.pattern_name_is_out_of_scope(name) {
@@ -491,9 +634,11 @@ impl ExprLowerer<'_, '_> {
                 let mut params = Vec::new();
                 while !self.eat(JavaSyntaxKind::RParen) {
                     let name = self.expect_ident()?;
+                    let name = Ustr::from(&name);
+                    self.body.define_local(name, Ty::object());
                     params.push(LambdaParam {
-                        name: Ustr::from(&name),
-                        ty: None,
+                        name,
+                        ty: Some(Ty::object()),
                     });
                     self.eat(JavaSyntaxKind::Comma);
                 }
@@ -502,6 +647,7 @@ impl ExprLowerer<'_, '_> {
                 Ok(self.body.alloc_expr(Expr::Lambda {
                     params,
                     body: LambdaBody::Expr(body_expr),
+                    target_ty: None,
                 }))
             }
             JavaSyntaxKind::LParen => {

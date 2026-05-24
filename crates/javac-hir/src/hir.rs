@@ -282,6 +282,7 @@ pub enum Expr {
     Lambda {
         params: Vec<LambdaParam>,
         body: LambdaBody,
+        target_ty: Option<Ty>,
     },
 
     MethodRef {

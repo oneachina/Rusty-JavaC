@@ -185,6 +185,8 @@ fn lower_method_decl(
     let mut body_builder = BodyBuilder::new(resolver.clone());
     define_params(&mut body_builder, &params);
     let root_block = lower_method_body(access_flags, &method, &mut body_builder)?;
+    let ret_ty = signature.return_type.clone();
+    body_builder.resolve_lambda_target_types(&ret_ty);
 
     Ok(MethodDecl {
         id: HirId(method_index + 1),
