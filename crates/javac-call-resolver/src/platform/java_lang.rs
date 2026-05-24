@@ -32,3 +32,43 @@ pub const CLASSES: &[&str] = &[
     "java/lang/Throwable",
     "java/lang/Void",
 ];
+
+use super::{Field, Method, Parent, parent, public_instance_method, public_static_field};
+
+pub const FIELDS: &[Field] = &[
+    public_static_field("java/lang/System", "out", "Ljava/io/PrintStream;"),
+    public_static_field("java/lang/System", "err", "Ljava/io/PrintStream;"),
+    public_static_field("java/lang/System", "in", "Ljava/io/InputStream;"),
+];
+
+pub const METHODS: &[Method] = &[
+    public_instance_method("java/lang/Object", "hashCode", "()I"),
+    public_instance_method("java/lang/Object", "equals", "(Ljava/lang/Object;)Z"),
+    public_instance_method("java/lang/Object", "toString", "()Ljava/lang/String;"),
+    public_instance_method("java/lang/String", "equals", "(Ljava/lang/Object;)Z"),
+    public_instance_method("java/lang/String", "hashCode", "()I"),
+    public_instance_method("java/lang/String", "isEmpty", "()Z"),
+    public_instance_method("java/lang/String", "length", "()I"),
+    public_instance_method("java/lang/String", "charAt", "(I)C"),
+    public_instance_method("java/lang/String", "toString", "()Ljava/lang/String;"),
+    public_instance_method("java/lang/Throwable", "printStackTrace", "()V"),
+];
+
+pub const PARENTS: &[Parent] = &[
+    parent("java/lang/Boolean", "java/lang/Object"),
+    parent("java/lang/Byte", "java/lang/Number"),
+    parent("java/lang/Character", "java/lang/Object"),
+    parent("java/lang/Double", "java/lang/Number"),
+    parent("java/lang/Exception", "java/lang/Throwable"),
+    parent("java/lang/Float", "java/lang/Number"),
+    parent("java/lang/Integer", "java/lang/Number"),
+    parent("java/lang/Long", "java/lang/Number"),
+    parent("java/lang/Number", "java/lang/Object"),
+    parent("java/lang/RuntimeException", "java/lang/Exception"),
+    parent("java/lang/Short", "java/lang/Number"),
+    parent("java/lang/String", "java/lang/Object"),
+    parent("java/lang/StringBuffer", "java/lang/Object"),
+    parent("java/lang/StringBuilder", "java/lang/Object"),
+    parent("java/lang/System", "java/lang/Object"),
+    parent("java/lang/Throwable", "java/lang/Object"),
+];

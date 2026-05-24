@@ -212,6 +212,7 @@ impl ClasspathScanner {
                     if class_file.access_flags & ACC_INTERFACE != 0 {
                         self.catalog.mark_interface(&internal_name);
                     }
+                    self.register_class_parents(&internal_name, &class_file);
                     self.register_class_members(&internal_name, &class_file);
                 }
                 Err(error) => self.handle_class_read_error(label, fallback_internal_name, error),
@@ -266,6 +267,23 @@ impl ClasspathScanner {
             if let Some(sig) = method_descriptor_to_sig(name, descriptor) {
                 self.catalog
                     .insert_method(internal_name, sig, method.access_flags, is_interface);
+            }
+        }
+    }
+
+    fn register_class_parents(
+        &mut self,
+        internal_name: &str,
+        class_file: &rust_asm::class_reader::ClassFile,
+    ) {
+        if class_file.super_class != 0
+            && let Ok(super_name) = class_file.class_name(class_file.super_class)
+        {
+            self.catalog.insert_parent(internal_name, super_name);
+        }
+        for interface in &class_file.interfaces {
+            if let Ok(interface_name) = class_file.class_name(*interface) {
+                self.catalog.insert_parent(internal_name, interface_name);
             }
         }
     }

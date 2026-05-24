@@ -15,6 +15,7 @@ const ACC_PRIVATE: u16 = 0x0002;
 const ACC_PROTECTED: u16 = 0x0004;
 const ACC_STATIC: u16 = 0x0008;
 const ACC_FINAL: u16 = 0x0010;
+const ACC_VARARGS: u16 = 0x0080;
 const ACC_ABSTRACT: u16 = 0x0400;
 
 #[derive(Clone)]
@@ -128,6 +129,14 @@ fn register_source_class(
     if is_interface {
         catalog.mark_interface(&owner);
     }
+    let type_vars = source_type_params(class.syntax());
+    let resolver = SourceTypeResolver {
+        catalog: catalog.clone(),
+        package,
+        imports,
+        type_vars: type_vars.clone(),
+    };
+    register_declared_parents(catalog, &owner, class.syntax(), &resolver);
     let Some(body) = class.body() else {
         return;
     };
@@ -138,7 +147,7 @@ fn register_source_class(
         package,
         imports,
         is_interface,
-        source_type_params(class.syntax()),
+        type_vars,
     );
 }
 
@@ -154,6 +163,14 @@ fn register_source_interface(
     let owner = internal_name(package, name.text());
     catalog.insert_internal_class(&owner);
     catalog.mark_interface(&owner);
+    let type_vars = source_type_params(interface.syntax());
+    let resolver = SourceTypeResolver {
+        catalog: catalog.clone(),
+        package,
+        imports,
+        type_vars: type_vars.clone(),
+    };
+    register_declared_parents(catalog, &owner, interface.syntax(), &resolver);
     let Some(body) = interface.body() else {
         return;
     };
@@ -164,7 +181,7 @@ fn register_source_interface(
         package,
         imports,
         true,
-        source_type_params(interface.syntax()),
+        type_vars,
     );
 }
 
@@ -269,12 +286,26 @@ fn register_source_method(
         return;
     };
     let sig = MethodSig::new(Ustr::from(name.text()), params, return_ty);
-    let flags = if is_interface {
+    let mut flags = if is_interface {
         access_flags | ACC_PUBLIC | ACC_ABSTRACT
     } else {
         access_flags
     };
+    if has_token(method.syntax(), JavaSyntaxKind::Ellipsis) {
+        flags |= ACC_VARARGS;
+    }
     catalog.insert_method(owner, sig, flags, is_interface);
+}
+
+fn register_declared_parents(
+    catalog: &mut ClassCatalog,
+    owner: &str,
+    node: &JavaSyntaxNode,
+    resolver: &SourceTypeResolver<'_>,
+) {
+    for parent in declared_parent_types(node, resolver) {
+        catalog.insert_parent(owner, parent.internal_name());
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -536,12 +567,81 @@ fn source_method_params(
         .children()
         .filter(|child| child.kind() == JavaSyntaxKind::FormalParam)
         .map(|param| {
-            param
+            let mut ty = param
                 .children()
                 .find(|child| child.kind() == JavaSyntaxKind::Type)
-                .and_then(|ty| resolver.resolve_type(&ty))
+                .and_then(|ty| resolver.resolve_type(&ty))?;
+            if has_token(&param, JavaSyntaxKind::Ellipsis) {
+                ty = Ty::Array(Box::new(ty));
+            }
+            Some(ty)
         })
         .collect()
+}
+
+fn declared_parent_types(node: &JavaSyntaxNode, resolver: &SourceTypeResolver<'_>) -> Vec<Ty> {
+    let tokens = node_tokens(node);
+    let mut parents = Vec::new();
+    let mut i = 0usize;
+
+    while let Some(token) = tokens.get(i) {
+        match token.kind {
+            JavaSyntaxKind::LBrace => break,
+            JavaSyntaxKind::ExtendsKw | JavaSyntaxKind::ImplementsKw => {
+                i += 1;
+                while let Some(token) = tokens.get(i) {
+                    if matches!(
+                        token.kind,
+                        JavaSyntaxKind::LBrace | JavaSyntaxKind::PermitsKw
+                    ) {
+                        break;
+                    }
+                    if token.kind == JavaSyntaxKind::Comma {
+                        i += 1;
+                        continue;
+                    }
+                    if let Some(name) = type_name_from_tokens(&tokens, i)
+                        && let Some(ty) = resolver.resolve_named_type(&name)
+                    {
+                        parents.push(ty);
+                    }
+                    i = skip_parent_type(&tokens, i);
+                }
+            }
+            _ => i += 1,
+        }
+    }
+
+    parents
+}
+
+fn skip_parent_type(tokens: &[Token], start: usize) -> usize {
+    let mut i = start;
+    let mut generic_depth = 0usize;
+
+    while let Some(token) = tokens.get(i) {
+        match token.kind {
+            JavaSyntaxKind::Lt => {
+                generic_depth += 1;
+                i += 1;
+            }
+            JavaSyntaxKind::Gt if generic_depth > 0 => {
+                generic_depth -= 1;
+                i += 1;
+            }
+            JavaSyntaxKind::Comma
+            | JavaSyntaxKind::LBrace
+            | JavaSyntaxKind::ImplementsKw
+            | JavaSyntaxKind::PermitsKw
+                if generic_depth == 0 =>
+            {
+                break;
+            }
+            _ => i += 1,
+        }
+    }
+
+    i
 }
 
 fn first_ident_text(node: &JavaSyntaxNode) -> Option<String> {
@@ -549,6 +649,12 @@ fn first_ident_text(node: &JavaSyntaxNode) -> Option<String> {
         .filter_map(|element| element.into_token())
         .find(|token| token.kind() == JavaSyntaxKind::Ident)
         .map(|token| token.text().to_string())
+}
+
+fn has_token(node: &JavaSyntaxNode, kind: JavaSyntaxKind) -> bool {
+    node.descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .any(|token| token.kind() == kind)
 }
 
 fn source_type_params(node: &JavaSyntaxNode) -> HashSet<String> {

@@ -96,7 +96,7 @@ fn emit_array_initializer(
     }
 }
 
-fn primitive_array_type_code(ty: &Ty) -> u8 {
+pub(super) fn primitive_array_type_code(ty: &Ty) -> u8 {
     match ty {
         Ty::Boolean => 4,
         Ty::Char => 5,

@@ -1,4 +1,3 @@
-mod calls;
 mod catalog;
 mod platform;
 
@@ -23,6 +22,7 @@ pub struct MethodRef {
     pub params: Vec<Ty>,
     pub opcode: u8,
     pub is_interface: bool,
+    pub is_varargs: bool,
     pub access_flags: u16,
 }
 

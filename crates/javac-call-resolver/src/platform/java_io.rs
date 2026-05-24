@@ -22,3 +22,47 @@ pub const CLASSES: &[&str] = &[
     "java/io/Serializable",
     "java/io/Writer",
 ];
+
+use super::{Method, Parent, parent, public_instance_method};
+
+pub const INTERFACES: &[&str] = &["java/io/Closeable", "java/io/Serializable"];
+
+pub const METHODS: &[Method] = &[
+    public_instance_method("java/io/InputStream", "read", "()I"),
+    public_instance_method("java/io/InputStream", "close", "()V"),
+    public_instance_method("java/io/FileInputStream", "read", "()I"),
+    public_instance_method("java/io/FileInputStream", "close", "()V"),
+    public_instance_method("java/io/PrintStream", "print", "(Z)V"),
+    public_instance_method("java/io/PrintStream", "print", "(C)V"),
+    public_instance_method("java/io/PrintStream", "print", "(I)V"),
+    public_instance_method("java/io/PrintStream", "print", "(J)V"),
+    public_instance_method("java/io/PrintStream", "print", "(F)V"),
+    public_instance_method("java/io/PrintStream", "print", "(D)V"),
+    public_instance_method("java/io/PrintStream", "print", "([C)V"),
+    public_instance_method("java/io/PrintStream", "print", "(Ljava/lang/String;)V"),
+    public_instance_method("java/io/PrintStream", "print", "(Ljava/lang/Object;)V"),
+    public_instance_method("java/io/PrintStream", "println", "()V"),
+    public_instance_method("java/io/PrintStream", "println", "(Z)V"),
+    public_instance_method("java/io/PrintStream", "println", "(C)V"),
+    public_instance_method("java/io/PrintStream", "println", "(I)V"),
+    public_instance_method("java/io/PrintStream", "println", "(J)V"),
+    public_instance_method("java/io/PrintStream", "println", "(F)V"),
+    public_instance_method("java/io/PrintStream", "println", "(D)V"),
+    public_instance_method("java/io/PrintStream", "println", "([C)V"),
+    public_instance_method("java/io/PrintStream", "println", "(Ljava/lang/String;)V"),
+    public_instance_method("java/io/PrintStream", "println", "(Ljava/lang/Object;)V"),
+];
+
+pub const PARENTS: &[Parent] = &[
+    parent("java/io/EOFException", "java/io/IOException"),
+    parent("java/io/FileNotFoundException", "java/io/IOException"),
+    parent("java/io/FileInputStream", "java/io/InputStream"),
+    parent("java/io/FileInputStream", "java/io/Closeable"),
+    parent("java/io/IOException", "java/lang/Exception"),
+    parent("java/io/InputStream", "java/lang/Object"),
+    parent("java/io/InputStream", "java/io/Closeable"),
+    parent("java/io/PrintStream", "java/lang/Object"),
+    parent("java/io/PrintStream", "java/io/Closeable"),
+    parent("java/io/Reader", "java/lang/Object"),
+    parent("java/io/Writer", "java/lang/Object"),
+];

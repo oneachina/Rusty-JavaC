@@ -32,3 +32,80 @@ pub const CLASSES: &[&str] = &[
     "java/util/UUID",
     "java/util/Vector",
 ];
+
+use super::{Method, Parent, parent, public_instance_method, public_interface_method};
+
+pub const INTERFACES: &[&str] = &[
+    "java/util/Collection",
+    "java/util/Comparator",
+    "java/util/Deque",
+    "java/util/Iterator",
+    "java/util/List",
+    "java/util/Map",
+    "java/util/Queue",
+    "java/util/Set",
+];
+
+pub const METHODS: &[Method] = &[
+    public_interface_method("java/util/Collection", "add", "(Ljava/lang/Object;)Z"),
+    public_interface_method("java/util/Collection", "contains", "(Ljava/lang/Object;)Z"),
+    public_interface_method("java/util/Collection", "isEmpty", "()Z"),
+    public_interface_method("java/util/Collection", "iterator", "()Ljava/util/Iterator;"),
+    public_interface_method("java/util/Collection", "remove", "(Ljava/lang/Object;)Z"),
+    public_interface_method("java/util/Collection", "size", "()I"),
+    public_interface_method("java/util/Iterator", "hasNext", "()Z"),
+    public_interface_method("java/util/Iterator", "next", "()Ljava/lang/Object;"),
+    public_interface_method("java/util/List", "add", "(Ljava/lang/Object;)Z"),
+    public_interface_method("java/util/List", "get", "(I)Ljava/lang/Object;"),
+    public_interface_method("java/util/List", "remove", "(I)Ljava/lang/Object;"),
+    public_interface_method(
+        "java/util/List",
+        "set",
+        "(ILjava/lang/Object;)Ljava/lang/Object;",
+    ),
+    public_interface_method("java/util/Map", "containsKey", "(Ljava/lang/Object;)Z"),
+    public_interface_method(
+        "java/util/Map",
+        "get",
+        "(Ljava/lang/Object;)Ljava/lang/Object;",
+    ),
+    public_interface_method(
+        "java/util/Map",
+        "put",
+        "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+    ),
+    public_interface_method("java/util/Map", "isEmpty", "()Z"),
+    public_interface_method("java/util/Map", "size", "()I"),
+    public_instance_method("java/util/Optional", "get", "()Ljava/lang/Object;"),
+    public_instance_method("java/util/Optional", "isPresent", "()Z"),
+    public_instance_method(
+        "java/util/Optional",
+        "orElse",
+        "(Ljava/lang/Object;)Ljava/lang/Object;",
+    ),
+];
+
+pub const PARENTS: &[Parent] = &[
+    parent("java/util/ArrayDeque", "java/util/Deque"),
+    parent("java/util/ArrayList", "java/util/List"),
+    parent("java/util/Collection", "java/lang/Object"),
+    parent("java/util/Comparator", "java/lang/Object"),
+    parent("java/util/Deque", "java/util/Queue"),
+    parent("java/util/HashMap", "java/util/Map"),
+    parent("java/util/HashSet", "java/util/Set"),
+    parent("java/util/Iterator", "java/lang/Object"),
+    parent("java/util/LinkedHashMap", "java/util/HashMap"),
+    parent("java/util/LinkedHashSet", "java/util/HashSet"),
+    parent("java/util/LinkedList", "java/util/List"),
+    parent("java/util/LinkedList", "java/util/Deque"),
+    parent("java/util/List", "java/util/Collection"),
+    parent("java/util/Map", "java/lang/Object"),
+    parent("java/util/Optional", "java/lang/Object"),
+    parent("java/util/PriorityQueue", "java/util/Queue"),
+    parent("java/util/Queue", "java/util/Collection"),
+    parent("java/util/Set", "java/util/Collection"),
+    parent("java/util/TreeMap", "java/util/Map"),
+    parent("java/util/TreeSet", "java/util/Set"),
+    parent("java/util/UUID", "java/lang/Object"),
+    parent("java/util/Vector", "java/util/List"),
+];

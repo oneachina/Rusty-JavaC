@@ -1,6 +1,6 @@
 use crate::codegen::CodegenCtx;
-use crate::expr_gen::{expr_ty, gen_expr, values};
-use javac_call_resolver::FieldRef;
+use crate::expr_gen::{arrays, coerce, expr_ty, gen_expr, literals, values};
+use javac_call_resolver::{FieldRef, MethodRef};
 use javac_classfile::MethodWriter;
 use javac_hir::hir::{Body, ExprId};
 use javac_ty::Ty;
@@ -61,9 +61,7 @@ pub(super) fn emit_method_call(
             &arg_types,
         ) {
             gen_expr(mw, ctx, body, target);
-            for arg in args {
-                gen_expr(mw, ctx, body, *arg);
-            }
+            emit_call_args(mw, ctx, body, args, &method_ref);
             mw.visit_method_insn(
                 method_ref.opcode,
                 &method_ref.owner,
@@ -161,4 +159,67 @@ fn emit_current_class_call(
 
 fn arg_types(ctx: &CodegenCtx, body: &Body, args: &[ExprId]) -> Vec<Ty> {
     args.iter().map(|arg| expr_ty(ctx, body, *arg)).collect()
+}
+
+fn emit_call_args(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    body: &Body,
+    args: &[ExprId],
+    method_ref: &MethodRef,
+) {
+    if method_ref.is_varargs
+        && let Some(fixed_count) = method_ref.params.len().checked_sub(1)
+        && args.len() >= fixed_count
+        && should_expand_varargs(ctx, body, args, method_ref)
+        && let Ty::Array(element_ty) = method_ref.params[fixed_count].erasure()
+    {
+        for arg in &args[..fixed_count] {
+            gen_expr(mw, ctx, body, *arg);
+        }
+        emit_varargs_array(mw, ctx, body, &args[fixed_count..], &element_ty);
+        return;
+    }
+
+    for arg in args {
+        gen_expr(mw, ctx, body, *arg);
+    }
+}
+
+fn should_expand_varargs(
+    ctx: &CodegenCtx,
+    body: &Body,
+    args: &[ExprId],
+    method_ref: &MethodRef,
+) -> bool {
+    if args.len() != method_ref.params.len() {
+        return true;
+    }
+    let Some(last_arg) = args.last().copied() else {
+        return true;
+    };
+    expr_ty(ctx, body, last_arg).erasure() != method_ref.params.last().unwrap().erasure()
+}
+
+fn emit_varargs_array(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    body: &Body,
+    args: &[ExprId],
+    element_ty: &Ty,
+) {
+    literals::emit_int(mw, args.len() as i64);
+    if element_ty.is_primitive() {
+        mw.visit_new_array(arrays::primitive_array_type_code(element_ty));
+    } else {
+        mw.visit_type_insn(opcodes::ANEWARRAY, &element_ty.internal_name());
+    }
+
+    for (index, arg) in args.iter().copied().enumerate() {
+        mw.visit_insn(opcodes::DUP);
+        literals::emit_int(mw, index as i64);
+        gen_expr(mw, ctx, body, arg);
+        coerce(mw, &expr_ty(ctx, body, arg), element_ty);
+        mw.visit_insn(arrays::array_store_opcode(element_ty));
+    }
 }
