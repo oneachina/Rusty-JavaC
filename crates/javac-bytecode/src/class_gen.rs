@@ -145,7 +145,7 @@ fn scan_and_gen_lambdas(
                 .collect::<Vec<_>>()
                 .join("");
             let impl_descriptor = format!("({})Ljava/lang/Object;", param_descs);
-            let sam_descriptor = format!("({})L{};", param_descs, sam_interface);
+            let sam_descriptor = format!("()L{};", sam_interface);
 
             let impl_method_handle = Handle {
                 reference_kind: rust_asm::constants::REF_INVOKE_STATIC,
