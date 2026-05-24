@@ -600,14 +600,19 @@ impl ExprLowerer<'_, '_> {
                     let name = Ustr::from(token.text.as_str());
                     self.pos += 1;
                     self.body.define_local(name, Ty::object());
-                    let body_expr = self.parse_expr()?;
+                    let body = if self.at_lambda_block() {
+                        self.skip_block_tokens();
+                        LambdaBody::Block(Block { stmts: vec![] })
+                    } else {
+                        LambdaBody::Expr(self.parse_expr()?)
+                    };
                     let params = vec![LambdaParam {
                         name,
                         ty: Some(Ty::object()),
                     }];
                     return Ok(self.body.alloc_expr(Expr::Lambda {
                         params,
-                        body: LambdaBody::Expr(body_expr),
+                        body,
                         target_ty: None,
                     }));
                 }
@@ -643,10 +648,15 @@ impl ExprLowerer<'_, '_> {
                     self.eat(JavaSyntaxKind::Comma);
                 }
                 self.expect(JavaSyntaxKind::Arrow)?;
-                let body_expr = self.parse_expr()?;
+                let body = if self.at_lambda_block() {
+                    self.skip_block_tokens();
+                    LambdaBody::Block(Block { stmts: vec![] })
+                } else {
+                    LambdaBody::Expr(self.parse_expr()?)
+                };
                 Ok(self.body.alloc_expr(Expr::Lambda {
                     params,
-                    body: LambdaBody::Expr(body_expr),
+                    body,
                     target_ty: None,
                 }))
             }
@@ -861,6 +871,23 @@ impl ExprLowerer<'_, '_> {
 
     fn peek_kind(&self) -> Option<JavaSyntaxKind> {
         self.peek().map(|token| token.kind)
+    }
+
+    fn at_lambda_block(&self) -> bool {
+        self.peek_kind() == Some(JavaSyntaxKind::LBrace)
+    }
+
+    fn skip_block_tokens(&mut self) {
+        let mut depth = 1;
+        self.pos += 1;
+        while self.pos < self.tokens.len() && depth > 0 {
+            match self.tokens[self.pos].kind {
+                JavaSyntaxKind::LBrace => depth += 1,
+                JavaSyntaxKind::RBrace => depth -= 1,
+                _ => {}
+            }
+            self.pos += 1;
+        }
     }
 
     fn peek_binary_op(&self) -> Option<(BinaryOp, u8)> {
