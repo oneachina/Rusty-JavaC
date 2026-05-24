@@ -186,7 +186,7 @@ fn emit_known_assign(
             emit_instance_field_assign(mw, ctx, request, field);
             true
         }
-        Expr::ArrayAccess { array, index } if matches!(request.op, AssignOp::Plain) => {
+        Expr::ArrayAccess { array, index } => {
             emit_array_assign(mw, ctx, request, array, index);
             true
         }
@@ -348,23 +348,33 @@ fn emit_array_assign(
 ) {
     let element_ty = super::arrays::array_element_type(ctx, request.body, array);
 
-    if request.mode.leaves_value() {
-        let slot = ctx.alloc_temp(&element_ty);
-        gen_expr(mw, ctx, request.body, request.value);
-        coerce(mw, &expr_ty(ctx, request.body, request.value), &element_ty);
-        mw.visit_var_insn(store_opcode(&element_ty), slot);
-        gen_expr(mw, ctx, request.body, array);
-        gen_expr(mw, ctx, request.body, index);
-        coerce(mw, &expr_ty(ctx, request.body, index), &Ty::Int);
-        mw.visit_var_insn(load_opcode(&element_ty), slot);
-        mw.visit_insn(super::arrays::array_store_opcode(&element_ty));
-        mw.visit_var_insn(load_opcode(&element_ty), slot);
-    } else {
-        gen_expr(mw, ctx, request.body, array);
-        gen_expr(mw, ctx, request.body, index);
-        coerce(mw, &expr_ty(ctx, request.body, index), &Ty::Int);
-        gen_expr(mw, ctx, request.body, request.value);
-        coerce(mw, &expr_ty(ctx, request.body, request.value), &element_ty);
-        mw.visit_insn(super::arrays::array_store_opcode(&element_ty));
+    gen_expr(mw, ctx, request.body, array);
+    gen_expr(mw, ctx, request.body, index);
+    coerce(mw, &expr_ty(ctx, request.body, index), &Ty::Int);
+
+    if !matches!(request.op, AssignOp::Plain) {
+        mw.visit_insn(opcodes::DUP2);
+        mw.visit_insn(super::arrays::array_load_opcode(&element_ty));
     }
+
+    gen_expr(mw, ctx, request.body, request.value);
+    coerce(mw, &expr_ty(ctx, request.body, request.value), &element_ty);
+
+    if !matches!(request.op, AssignOp::Plain) {
+        super::ops::emit_assign_op(mw, request.op, &element_ty);
+    }
+
+    if request.mode.leaves_value() {
+        dup_array_store_value(mw, &element_ty);
+    }
+
+    mw.visit_insn(super::arrays::array_store_opcode(&element_ty));
+}
+
+fn dup_array_store_value(mw: &mut MethodWriter, ty: &Ty) {
+    mw.visit_insn(if ty.size() == 2 {
+        opcodes::DUP2_X2
+    } else {
+        opcodes::DUP_X2
+    });
 }
