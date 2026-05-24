@@ -451,6 +451,22 @@ impl ExprLowerer<'_, '_> {
                 Ok(self.body.alloc_expr(Expr::Super))
             }
             JavaSyntaxKind::NewKw => self.parse_new_expr(),
+            JavaSyntaxKind::Ident
+                if self
+                    .tokens
+                    .get(self.pos + 1)
+                    .is_some_and(|t| t.kind == JavaSyntaxKind::Arrow) =>
+            {
+                self.pos += 1;
+                let name = Ustr::from(token.text.as_str());
+                self.pos += 1;
+                let body_expr = self.parse_expr()?;
+                let params = vec![LambdaParam { name, ty: None }];
+                Ok(self.body.alloc_expr(Expr::Lambda {
+                    params,
+                    body: LambdaBody::Expr(body_expr),
+                }))
+            }
             JavaSyntaxKind::Ident => {
                 let name = self.expect_ident()?;
                 let name = Ustr::from(&name);
@@ -469,6 +485,24 @@ impl ExprLowerer<'_, '_> {
                         .alloc_expr(Expr::ClassName(Ustr::from(&class_name))));
                 }
                 Ok(self.body.alloc_expr(Expr::Ident(name)))
+            }
+            JavaSyntaxKind::LParen if self.is_lambda_paren() => {
+                self.pos += 1;
+                let mut params = Vec::new();
+                while !self.eat(JavaSyntaxKind::RParen) {
+                    let name = self.expect_ident()?;
+                    params.push(LambdaParam {
+                        name: Ustr::from(&name),
+                        ty: None,
+                    });
+                    self.eat(JavaSyntaxKind::Comma);
+                }
+                self.expect(JavaSyntaxKind::Arrow)?;
+                let body_expr = self.parse_expr()?;
+                Ok(self.body.alloc_expr(Expr::Lambda {
+                    params,
+                    body: LambdaBody::Expr(body_expr),
+                }))
             }
             JavaSyntaxKind::LParen => {
                 self.pos += 1;
@@ -641,6 +675,38 @@ impl ExprLowerer<'_, '_> {
             }
         }
         None
+    }
+
+    fn is_lambda_paren(&self) -> bool {
+        let mut depth = 1i32;
+        let mut i = self.pos + 1;
+        loop {
+            if i >= self.tokens.len() {
+                return false;
+            }
+            match self.tokens[i].kind {
+                JavaSyntaxKind::LParen => depth += 1,
+                JavaSyntaxKind::RParen => {
+                    depth -= 1;
+                    if depth == 0 {
+                        i += 1;
+                        while i < self.tokens.len()
+                            && matches!(
+                                self.tokens[i].kind,
+                                JavaSyntaxKind::Whitespace | JavaSyntaxKind::Comment
+                            )
+                        {
+                            i += 1;
+                        }
+                        return i < self.tokens.len()
+                            && self.tokens[i].kind == JavaSyntaxKind::Arrow;
+                    }
+                }
+                JavaSyntaxKind::Arrow => return false,
+                _ => {}
+            }
+            i += 1;
+        }
     }
 
     fn peek(&self) -> Option<&ExprToken> {
