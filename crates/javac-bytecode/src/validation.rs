@@ -192,6 +192,9 @@ impl Validator {
                 self.validate_stmt(body, &mut scope.clone(), *loop_body)?;
                 self.validate_expr(body, &mut stmt_scope, *condition)
             }
+            Stmt::Labeled {
+                body: labeled_body, ..
+            } => self.validate_stmt(body, &mut scope.clone(), *labeled_body),
             Stmt::Switch { selector, cases } => {
                 self.validate_expr(body, &mut stmt_scope, *selector)?;
                 for case in cases {

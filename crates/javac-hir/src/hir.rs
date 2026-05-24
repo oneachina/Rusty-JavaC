@@ -133,6 +133,10 @@ pub enum Stmt {
     Throw(ExprId),
     Break(Option<Ustr>),
     Continue(Option<Ustr>),
+    Labeled {
+        label: Ustr,
+        body: StmtId,
+    },
     Switch {
         selector: ExprId,
         cases: Vec<SwitchCase>,

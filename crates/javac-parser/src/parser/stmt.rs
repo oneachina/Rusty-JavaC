@@ -15,6 +15,7 @@ pub(crate) fn block(p: &mut Parser) {
 pub(crate) fn stmt(p: &mut Parser) {
     use JavaSyntaxKind::*;
     match p.kind() {
+        Ident if p.look(1) == Colon => labeled_stmt(p),
         LBrace => block(p),
         IfKw => if_stmt(p),
         ForKw => for_stmt(p),
@@ -36,6 +37,15 @@ pub(crate) fn stmt(p: &mut Parser) {
         }
         _ => expr_or_local_decl(p),
     }
+}
+
+fn labeled_stmt(p: &mut Parser) {
+    use JavaSyntaxKind::*;
+    let m = p.start();
+    p.expect(Ident);
+    p.expect(Colon);
+    stmt(p);
+    m.complete(p, LabeledStmt);
 }
 
 pub(crate) fn if_stmt(p: &mut Parser) {

@@ -51,6 +51,7 @@ fn lower_stmt_nodes(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResul
         JavaSyntaxKind::EmptyStmt => vec![body.alloc_stmt_at(Stmt::Empty, source_line(stmt))],
         JavaSyntaxKind::BreakStmt => vec![lower_break_stmt(stmt, body)],
         JavaSyntaxKind::ContinueStmt => vec![lower_continue_stmt(stmt, body)],
+        JavaSyntaxKind::LabeledStmt => vec![lower_labeled_stmt(stmt, body)?],
         JavaSyntaxKind::YieldStmt => vec![lower_yield_stmt(stmt, body)?],
         _ => Vec::new(),
     };
@@ -151,6 +152,28 @@ fn lower_break_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> StmtId {
 
 fn lower_continue_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> StmtId {
     body.alloc_stmt_at(Stmt::Continue(optional_label(stmt)), source_line(stmt))
+}
+
+fn lower_labeled_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<StmtId> {
+    let label = stmt
+        .children_with_tokens()
+        .filter_map(|element| element.into_token())
+        .find(|token| token.kind() == JavaSyntaxKind::Ident)
+        .map(|token| Ustr::from(token.text()))
+        .ok_or(LowerError::MissingMethodName)?;
+    let body_node = stmt
+        .children()
+        .find(is_statement_node)
+        .ok_or(LowerError::UnsupportedExpression)?;
+    let labeled_body = lower_stmt_as_branch(&body_node, body)?;
+
+    Ok(body.alloc_stmt_at(
+        Stmt::Labeled {
+            label,
+            body: labeled_body,
+        },
+        source_line(stmt),
+    ))
 }
 
 fn lower_yield_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<StmtId> {
@@ -359,7 +382,7 @@ fn lower_do_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<S
         .ok_or(LowerError::UnsupportedExpression)?;
     let loop_body = lower_stmt_as_branch(&body_node, body)?;
     let condition = body
-        .lower_expr_tokens(&tokens_in_first_parens(stmt)?)?
+        .lower_expr_tokens(&tokens_after_keyword(stmt, JavaSyntaxKind::WhileKw))?
         .ok_or(LowerError::UnsupportedExpression)?;
 
     Ok(body.alloc_stmt_at(
@@ -637,6 +660,7 @@ fn is_statement_node(node: &JavaSyntaxNode) -> bool {
             | JavaSyntaxKind::ThrowStmt
             | JavaSyntaxKind::BreakStmt
             | JavaSyntaxKind::ContinueStmt
+            | JavaSyntaxKind::LabeledStmt
             | JavaSyntaxKind::SwitchStmt
             | JavaSyntaxKind::YieldStmt
     )
