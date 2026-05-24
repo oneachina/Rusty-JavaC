@@ -124,6 +124,8 @@ pub mod codegen;
 pub mod error;
 #[path = "../crates/javac-bytecode/src/expr_gen.rs"]
 pub mod expr_gen;
+#[path = "../crates/javac-bytecode/src/lambda.rs"]
+mod lambda;
 #[path = "../crates/javac-bytecode/src/local_var.rs"]
 pub mod local_var;
 #[path = "../crates/javac-bytecode/src/method_gen.rs"]

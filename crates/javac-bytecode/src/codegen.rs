@@ -1,8 +1,8 @@
+use crate::lambda::LambdaTable;
 use javac_call_resolver::ClassCatalog;
 use javac_classfile::{ClassFileWriter, Label};
-use javac_hir::hir::{Block, ExprId, FieldDecl, LambdaParam, MethodDecl};
+use javac_hir::hir::{Block, FieldDecl, MethodDecl};
 use javac_ty::{MethodSig, Ty};
-use rust_asm::insn::Handle;
 use std::collections::HashMap;
 use ustr::Ustr;
 
@@ -30,18 +30,6 @@ pub struct ControlTarget {
     pub cleanup_depth: usize,
 }
 
-#[derive(Clone)]
-pub struct LambdaInfo {
-    pub synthetic_name: String,
-    pub sam_interface: String,
-    pub sam_method_name: String,
-    pub sam_method_type: String,
-    pub sam_descriptor: String,
-    pub impl_descriptor: String,
-    pub params: Vec<LambdaParam>,
-    pub impl_method_handle: Handle,
-}
-
 pub struct CodegenCtx<'a> {
     pub writer: &'a mut ClassFileWriter,
     pub catalog: ClassCatalog,
@@ -58,7 +46,7 @@ pub struct CodegenCtx<'a> {
     pub labeled_break_labels: Vec<(Ustr, ControlTarget)>,
     pub labeled_continue_labels: Vec<(Ustr, ControlTarget)>,
     pub cleanup_scopes: Vec<CleanupScope>,
-    pub lambda_info: HashMap<ExprId, LambdaInfo>,
+    pub(crate) lambdas: LambdaTable,
 }
 
 impl<'a> CodegenCtx<'a> {
@@ -79,7 +67,7 @@ impl<'a> CodegenCtx<'a> {
             labeled_break_labels: Vec::new(),
             labeled_continue_labels: Vec::new(),
             cleanup_scopes: Vec::new(),
-            lambda_info: HashMap::new(),
+            lambdas: HashMap::new(),
         }
     }
 

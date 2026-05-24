@@ -310,34 +310,38 @@ fn is_ident_lambda(p: &mut Parser) -> bool {
 fn lambda_expr_from_paren(p: &mut Parser) {
     use JavaSyntaxKind::*;
     let m = p.start();
-    p.bump();
+    p.expect(LParen);
     while !p.at(RParen) && p.kind() != Error {
-        let pm = p.start();
-        p.expect(Ident);
-        pm.complete(p, LambdaParam);
+        lambda_param(p);
         p.eat(Comma);
     }
     p.expect(RParen);
     p.expect(Arrow);
-    if p.at(LBrace) {
-        stmt::block(p);
-    } else {
-        expr(p);
-    }
+    lambda_body(p);
     m.complete(p, LambdaExpr);
 }
 
 fn lambda_expr_from_ident(p: &mut Parser) {
     use JavaSyntaxKind::*;
     let m = p.start();
-    let pm = p.start();
-    p.expect(Ident);
-    pm.complete(p, LambdaParam);
+    lambda_param(p);
     p.expect(Arrow);
+    lambda_body(p);
+    m.complete(p, LambdaExpr);
+}
+
+fn lambda_param(p: &mut Parser) {
+    use JavaSyntaxKind::*;
+    let m = p.start();
+    p.expect(Ident);
+    m.complete(p, LambdaParam);
+}
+
+fn lambda_body(p: &mut Parser) {
+    use JavaSyntaxKind::*;
     if p.at(LBrace) {
         stmt::block(p);
     } else {
         expr(p);
     }
-    m.complete(p, LambdaExpr);
 }

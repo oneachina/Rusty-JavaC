@@ -1,15 +1,12 @@
-use crate::codegen::{CodegenCtx, LambdaInfo};
+use crate::codegen::CodegenCtx;
 use crate::error::BytecodeError;
-use crate::expr_gen;
-use crate::local_var::return_opcode;
+use crate::lambda::{self, LambdaTable};
 use javac_call_resolver::ClassCatalog;
 use javac_classfile::ClassFileWriter;
 use javac_hir::hir::*;
 use javac_ty::Ty;
 use rust_asm::constants::V21;
-use rust_asm::insn::Handle;
 use rust_asm::opcodes;
-use std::collections::HashMap;
 
 const OBJECT_CLASS: &str = "java/lang/Object";
 const INIT_METHOD: &str = "<init>";
@@ -71,24 +68,15 @@ fn gen_type_decl(writer: &mut ClassFileWriter, type_decl: &TypeDecl, catalog: &C
 
     let mut counter = 0u32;
     for method in &type_decl.methods {
-        let mut method_lambda_infos: HashMap<ExprId, LambdaInfo> = HashMap::new();
-        scan_and_gen_lambdas(
+        let lambdas = lambda::emit_lambda_methods(
             writer,
             type_decl,
             &super_name,
             catalog,
             method,
-            &mut method_lambda_infos,
             &mut counter,
         );
-        gen_method(
-            writer,
-            type_decl,
-            method,
-            &super_name,
-            catalog,
-            &method_lambda_infos,
-        );
+        gen_method(writer, type_decl, method, &super_name, catalog, &lambdas);
     }
 }
 
@@ -103,173 +91,13 @@ fn gen_fields(writer: &mut ClassFileWriter, fields: &[FieldDecl]) {
     }
 }
 
-struct SamInfo {
-    interface: String,
-    method_name: String,
-    method_type: String,
-    return_ty: Ty,
-}
-
-fn resolve_sam_interface(expr: &Expr, catalog: &ClassCatalog, param_count: usize) -> SamInfo {
-    if let Expr::Lambda {
-        target_ty: Some(Ty::Class(name)),
-        ..
-    } = expr
-    {
-        if let Some(method) = catalog.functional_interface_method(name) {
-            let (method_type, return_ty) = erased_descriptor_from_method_ref(&method);
-            return SamInfo {
-                interface: name.to_string(),
-                method_name: method.name.clone(),
-                method_type,
-                return_ty,
-            };
-        }
-    }
-    match param_count {
-        0 => SamInfo {
-            interface: "java/util/function/Supplier".into(),
-            method_name: "get".into(),
-            method_type: "()Ljava/lang/Object;".into(),
-            return_ty: Ty::object(),
-        },
-        1 => SamInfo {
-            interface: "java/util/function/Function".into(),
-            method_name: "apply".into(),
-            method_type: "(Ljava/lang/Object;)Ljava/lang/Object;".into(),
-            return_ty: Ty::object(),
-        },
-        _ => SamInfo {
-            interface: "java/util/function/BiFunction".into(),
-            method_name: "apply".into(),
-            method_type: "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;".into(),
-            return_ty: Ty::object(),
-        },
-    }
-}
-
-fn erased_descriptor_from_method_ref(mr: &javac_call_resolver::MethodRef) -> (String, Ty) {
-    let param_descs: String = mr
-        .params
-        .iter()
-        .map(|_| "Ljava/lang/Object;")
-        .collect::<Vec<_>>()
-        .join("");
-    let (ret, return_ty) = if matches!(mr.return_ty, Ty::Void) {
-        ("V", Ty::Void)
-    } else {
-        ("Ljava/lang/Object;", Ty::object())
-    };
-    (format!("({}){}", param_descs, ret), return_ty)
-}
-
-fn scan_and_gen_lambdas(
-    writer: &mut ClassFileWriter,
-    type_decl: &TypeDecl,
-    super_name: &str,
-    catalog: &ClassCatalog,
-    method: &MethodDecl,
-    lambda_infos: &mut HashMap<ExprId, LambdaInfo>,
-    counter: &mut u32,
-) {
-    for (expr_id, expr) in method.body.exprs.iter() {
-        if let Expr::Lambda {
-            params,
-            body: lambda_body,
-            ..
-        } = expr
-        {
-            let synthetic_name = format!("lambda${}${}", method.name, counter);
-            *counter += 1;
-
-            let sam_info = resolve_sam_interface(expr, catalog, params.len());
-
-            let param_descs: String = params
-                .iter()
-                .map(|_| "Ljava/lang/Object;")
-                .collect::<Vec<_>>()
-                .join("");
-            let impl_descriptor = format!("({}){}", param_descs, sam_info.return_ty.descriptor());
-            let sam_descriptor = format!("()L{};", sam_info.interface);
-
-            let impl_method_handle = Handle {
-                reference_kind: rust_asm::constants::REF_INVOKE_STATIC,
-                owner: type_decl.name.to_string(),
-                name: synthetic_name.clone(),
-                descriptor: impl_descriptor.clone(),
-                is_interface: false,
-            };
-
-            {
-                let mut mw = writer.visit_method(
-                    javac_classfile::ACC_PRIVATE
-                        | javac_classfile::ACC_STATIC
-                        | javac_classfile::ACC_SYNTHETIC,
-                    &synthetic_name,
-                    &impl_descriptor,
-                );
-                mw.visit_code();
-
-                let mut ctx = CodegenCtx::new(writer, type_decl.name, catalog);
-                ctx.set_super_name(ustr::Ustr::from(super_name));
-                ctx.set_fields(&type_decl.fields);
-                ctx.set_methods(&type_decl.methods);
-
-                ctx.return_ty = sam_info.return_ty.clone();
-                ctx.next_local = 0;
-                ctx.locals.clear();
-                ctx.local_types.clear();
-                for (i, param) in params.iter().enumerate() {
-                    let ty = param.ty.clone().unwrap_or(Ty::object());
-                    mw.visit_local_variable(
-                        param.name.as_str(),
-                        &ty.erasure().descriptor(),
-                        i as u16,
-                    );
-                    ctx.locals.insert(param.name, i as u16);
-                    ctx.local_types.insert(param.name, ty);
-                    ctx.next_local = (i as u16) + 1;
-                }
-
-                match lambda_body {
-                    LambdaBody::Expr(body_expr_id) => {
-                        expr_gen::gen_expr(&mut mw, &mut ctx, &method.body, *body_expr_id);
-                        let body_ty = expr_gen::expr_ty(&ctx, &method.body, *body_expr_id);
-                        mw.visit_insn(return_opcode(&body_ty));
-                    }
-                    LambdaBody::Block(block) => {
-                        crate::method_gen::gen_method_body(&mut mw, &mut ctx, &method.body, block);
-                    }
-                }
-
-                mw.visit_maxs(0, 0);
-                mw.visit_end(writer);
-            }
-
-            lambda_infos.insert(
-                expr_id,
-                LambdaInfo {
-                    synthetic_name,
-                    sam_interface: sam_info.interface.clone(),
-                    sam_method_name: sam_info.method_name.clone(),
-                    sam_method_type: sam_info.method_type.clone(),
-                    sam_descriptor: sam_descriptor.to_string(),
-                    impl_descriptor,
-                    params: params.clone(),
-                    impl_method_handle,
-                },
-            );
-        }
-    }
-}
-
 fn gen_method(
     writer: &mut ClassFileWriter,
     type_decl: &TypeDecl,
     method: &MethodDecl,
     super_name: &str,
     catalog: &ClassCatalog,
-    lambda_infos: &HashMap<ExprId, LambdaInfo>,
+    lambdas: &LambdaTable,
 ) {
     let descriptor = method.signature.descriptor();
     let mut mw = writer.visit_method(method.access_flags, &method.name, &descriptor);
@@ -288,7 +116,7 @@ fn gen_method(
         ctx.set_super_name(ustr::Ustr::from(super_name));
         ctx.set_fields(&type_decl.fields);
         ctx.set_methods(&type_decl.methods);
-        ctx.lambda_info = lambda_infos.clone();
+        ctx.lambdas = lambdas.clone();
         ctx.begin_method(method);
         declare_method_locals(&mut mw, type_decl, method);
         gen_constructor_prelude(&mut mw, &ctx, method);

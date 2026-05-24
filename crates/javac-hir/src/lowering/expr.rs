@@ -590,32 +590,10 @@ impl ExprLowerer<'_, '_> {
                 Ok(self.body.alloc_expr(Expr::Super))
             }
             JavaSyntaxKind::NewKw => self.parse_new_expr(),
+            JavaSyntaxKind::Ident if self.at_ident_lambda() => {
+                self.parse_ident_lambda(token.text.as_str())
+            }
             JavaSyntaxKind::Ident => {
-                let is_lambda = self
-                    .tokens
-                    .get(self.pos + 1)
-                    .is_some_and(|t| t.kind == JavaSyntaxKind::Arrow);
-                if is_lambda {
-                    self.pos += 1;
-                    let name = Ustr::from(token.text.as_str());
-                    self.pos += 1;
-                    self.body.define_local(name, Ty::object());
-                    let body = if self.at_lambda_block() {
-                        self.skip_block_tokens();
-                        LambdaBody::Block(Block { stmts: vec![] })
-                    } else {
-                        LambdaBody::Expr(self.parse_expr()?)
-                    };
-                    let params = vec![LambdaParam {
-                        name,
-                        ty: Some(Ty::object()),
-                    }];
-                    return Ok(self.body.alloc_expr(Expr::Lambda {
-                        params,
-                        body,
-                        target_ty: None,
-                    }));
-                }
                 let name = self.expect_ident()?;
                 let name = Ustr::from(&name);
                 if self.body.pattern_name_is_out_of_scope(name) {
@@ -634,32 +612,7 @@ impl ExprLowerer<'_, '_> {
                 }
                 Ok(self.body.alloc_expr(Expr::Ident(name)))
             }
-            JavaSyntaxKind::LParen if self.is_lambda_paren() => {
-                self.pos += 1;
-                let mut params = Vec::new();
-                while !self.eat(JavaSyntaxKind::RParen) {
-                    let name = self.expect_ident()?;
-                    let name = Ustr::from(&name);
-                    self.body.define_local(name, Ty::object());
-                    params.push(LambdaParam {
-                        name,
-                        ty: Some(Ty::object()),
-                    });
-                    self.eat(JavaSyntaxKind::Comma);
-                }
-                self.expect(JavaSyntaxKind::Arrow)?;
-                let body = if self.at_lambda_block() {
-                    self.skip_block_tokens();
-                    LambdaBody::Block(Block { stmts: vec![] })
-                } else {
-                    LambdaBody::Expr(self.parse_expr()?)
-                };
-                Ok(self.body.alloc_expr(Expr::Lambda {
-                    params,
-                    body,
-                    target_ty: None,
-                }))
-            }
+            JavaSyntaxKind::LParen if self.is_lambda_paren() => self.parse_parenthesized_lambda(),
             JavaSyntaxKind::LParen => {
                 self.pos += 1;
                 let inner = self.parse_expr()?;
@@ -668,6 +621,59 @@ impl ExprLowerer<'_, '_> {
             }
             _ => Err(LowerError::UnsupportedExpression),
         }
+    }
+
+    fn parse_ident_lambda(&mut self, name: &str) -> LowerResult<ExprId> {
+        self.pos += 1;
+        self.expect(JavaSyntaxKind::Arrow)?;
+        self.finish_lambda(vec![lambda_param(Ustr::from(name))])
+    }
+
+    fn parse_parenthesized_lambda(&mut self) -> LowerResult<ExprId> {
+        self.expect(JavaSyntaxKind::LParen)?;
+        let params = self.parse_lambda_params()?;
+        self.expect(JavaSyntaxKind::Arrow)?;
+        self.finish_lambda(params)
+    }
+
+    fn parse_lambda_params(&mut self) -> LowerResult<Vec<LambdaParam>> {
+        let mut params = Vec::new();
+        if self.eat(JavaSyntaxKind::RParen) {
+            return Ok(params);
+        }
+
+        loop {
+            let name = Ustr::from(&self.expect_ident()?);
+            params.push(lambda_param(name));
+            if self.eat(JavaSyntaxKind::Comma) {
+                continue;
+            }
+            self.expect(JavaSyntaxKind::RParen)?;
+            return Ok(params);
+        }
+    }
+
+    fn finish_lambda(&mut self, params: Vec<LambdaParam>) -> LowerResult<ExprId> {
+        self.body.enter_scope();
+        for param in &params {
+            self.body
+                .define_local(param.name, param.ty.clone().unwrap_or_else(Ty::object));
+        }
+        let body = self.parse_lambda_body();
+        self.body.exit_scope();
+        Ok(self.body.alloc_expr(Expr::Lambda {
+            params,
+            body: body?,
+            target_ty: None,
+        }))
+    }
+
+    fn parse_lambda_body(&mut self) -> LowerResult<LambdaBody> {
+        if self.at_lambda_block() {
+            self.skip_block_tokens();
+            return Ok(LambdaBody::Block(Block { stmts: vec![] }));
+        }
+        Ok(LambdaBody::Expr(self.parse_expr()?))
     }
 
     fn parse_new_expr(&mut self) -> LowerResult<ExprId> {
@@ -873,6 +879,12 @@ impl ExprLowerer<'_, '_> {
         self.peek().map(|token| token.kind)
     }
 
+    fn at_ident_lambda(&self) -> bool {
+        self.tokens
+            .get(self.pos + 1)
+            .is_some_and(|token| token.kind == JavaSyntaxKind::Arrow)
+    }
+
     fn at_lambda_block(&self) -> bool {
         self.peek_kind() == Some(JavaSyntaxKind::LBrace)
     }
@@ -986,4 +998,11 @@ fn is_primitive_type_token(kind: JavaSyntaxKind) -> bool {
             | JavaSyntaxKind::FloatKw
             | JavaSyntaxKind::DoubleKw
     )
+}
+
+fn lambda_param(name: Ustr) -> LambdaParam {
+    LambdaParam {
+        name,
+        ty: Some(Ty::object()),
+    }
 }
