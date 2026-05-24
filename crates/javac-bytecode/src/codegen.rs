@@ -1,6 +1,6 @@
 use javac_call_resolver::ClassCatalog;
 use javac_classfile::{ClassFileWriter, Label};
-use javac_hir::hir::{FieldDecl, MethodDecl};
+use javac_hir::hir::{Block, FieldDecl, MethodDecl};
 use javac_ty::{MethodSig, Ty};
 use std::collections::HashMap;
 use ustr::Ustr;
@@ -9,6 +9,24 @@ use ustr::Ustr;
 pub struct FieldInfo {
     pub ty: Ty,
     pub access_flags: u16,
+}
+
+#[derive(Clone)]
+pub struct CleanupResource {
+    pub ty: Ty,
+    pub slot: u16,
+}
+
+#[derive(Clone)]
+pub struct CleanupScope {
+    pub resources: Vec<CleanupResource>,
+    pub finally: Option<Block>,
+}
+
+#[derive(Clone, Copy)]
+pub struct ControlTarget {
+    pub label: Label,
+    pub cleanup_depth: usize,
 }
 
 pub struct CodegenCtx<'a> {
@@ -22,8 +40,11 @@ pub struct CodegenCtx<'a> {
     pub local_types: HashMap<Ustr, Ty>,
     pub fields: HashMap<Ustr, FieldInfo>,
     pub methods: HashMap<Ustr, MethodSig>,
-    pub break_labels: Vec<Label>,
-    pub continue_labels: Vec<Label>,
+    pub break_labels: Vec<ControlTarget>,
+    pub continue_labels: Vec<ControlTarget>,
+    pub labeled_break_labels: Vec<(Ustr, ControlTarget)>,
+    pub labeled_continue_labels: Vec<(Ustr, ControlTarget)>,
+    pub cleanup_scopes: Vec<CleanupScope>,
 }
 
 impl<'a> CodegenCtx<'a> {
@@ -41,6 +62,9 @@ impl<'a> CodegenCtx<'a> {
             methods: HashMap::new(),
             break_labels: Vec::new(),
             continue_labels: Vec::new(),
+            labeled_break_labels: Vec::new(),
+            labeled_continue_labels: Vec::new(),
+            cleanup_scopes: Vec::new(),
         }
     }
 
@@ -122,5 +146,49 @@ impl<'a> CodegenCtx<'a> {
 
     pub fn method_sig(&self, name: Ustr) -> Option<MethodSig> {
         self.methods.get(&name).cloned()
+    }
+
+    pub fn control_target(&self, label: Label) -> ControlTarget {
+        ControlTarget {
+            label,
+            cleanup_depth: self.cleanup_scopes.len(),
+        }
+    }
+
+    pub fn push_labeled_loop(
+        &mut self,
+        label: Ustr,
+        break_label: ControlTarget,
+        continue_label: ControlTarget,
+    ) {
+        self.labeled_break_labels.push((label, break_label));
+        self.labeled_continue_labels.push((label, continue_label));
+    }
+
+    pub fn pop_labeled_loop(&mut self) {
+        self.labeled_break_labels.pop();
+        self.labeled_continue_labels.pop();
+    }
+
+    pub fn find_break_target(&self, label: Option<Ustr>) -> Option<ControlTarget> {
+        match label {
+            Some(label) => self
+                .labeled_break_labels
+                .iter()
+                .rev()
+                .find_map(|(name, target)| (*name == label).then_some(*target)),
+            None => self.break_labels.last().copied(),
+        }
+    }
+
+    pub fn find_continue_target(&self, label: Option<Ustr>) -> Option<ControlTarget> {
+        match label {
+            Some(label) => self
+                .labeled_continue_labels
+                .iter()
+                .rev()
+                .find_map(|(name, target)| (*name == label).then_some(*target)),
+            None => self.continue_labels.last().copied(),
+        }
     }
 }

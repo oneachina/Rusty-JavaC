@@ -177,7 +177,8 @@ fn emit_case_bodies(
     end_label: Label,
     switch_use: &SwitchUse,
 ) {
-    ctx.break_labels.push(end_label);
+    let break_target = ctx.control_target(end_label);
+    ctx.break_labels.push(break_target);
     for (index, case) in cases.iter().enumerate() {
         if let Some(label) = labels[index] {
             mw.visit_label(label);

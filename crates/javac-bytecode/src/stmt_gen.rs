@@ -1,4 +1,4 @@
-use crate::codegen::CodegenCtx;
+use crate::codegen::{CleanupResource, CleanupScope, CodegenCtx};
 use crate::local_var::{load_opcode, store_opcode};
 use javac_classfile::Label;
 use javac_classfile::MethodWriter;
@@ -15,9 +15,14 @@ pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_i
             let expr_ty = crate::expr_gen::expr_ty(ctx, body, *expr_id);
             let return_ty = ctx.return_ty.clone();
             crate::expr_gen::coerce(mw, &expr_ty, &return_ty);
+            let slot = ctx.alloc_temp(&return_ty);
+            mw.visit_var_insn(store_opcode(&return_ty), slot);
+            emit_abrupt_cleanups(mw, ctx, body);
+            mw.visit_var_insn(load_opcode(&return_ty), slot);
             mw.visit_insn(return_opcode(&return_ty));
         }
         Stmt::Return(None) => {
+            emit_cleanups_to_depth(mw, ctx, body, 0);
             mw.visit_insn(opcodes::RETURN);
         }
         Stmt::Expr(expr_id) => {
@@ -69,44 +74,13 @@ pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_i
             condition,
             body: loop_body,
         } => {
-            if is_true_literal(body, *condition) && stmt_is_plain_break(body, *loop_body) {
-                return;
-            }
-
-            let start_label = Label::new();
-            let end_label = Label::new();
-            mw.visit_label(start_label);
-            crate::expr_gen::branch::emit_jump_if_false(mw, ctx, body, *condition, end_label);
-            ctx.continue_labels.push(start_label);
-            ctx.break_labels.push(end_label);
-            gen_stmt(mw, ctx, body, *loop_body);
-            ctx.break_labels.pop();
-            ctx.continue_labels.pop();
-            if !stmt_definitely_exits(body, *loop_body) {
-                mw.visit_jump_insn(opcodes::GOTO, start_label);
-            }
-            mw.visit_label(end_label);
+            emit_while_stmt(mw, ctx, body, *condition, *loop_body, None);
         }
         Stmt::Do {
             body: loop_body,
             condition,
         } => {
-            if is_false_literal(body, *condition) && stmt_is_plain_continue(body, *loop_body) {
-                return;
-            }
-
-            let start_label = Label::new();
-            let continue_label = Label::new();
-            let end_label = Label::new();
-            mw.visit_label(start_label);
-            ctx.continue_labels.push(continue_label);
-            ctx.break_labels.push(end_label);
-            gen_stmt(mw, ctx, body, *loop_body);
-            ctx.break_labels.pop();
-            ctx.continue_labels.pop();
-            mw.visit_label(continue_label);
-            crate::expr_gen::branch::emit_jump_if_true(mw, ctx, body, *condition, start_label);
-            mw.visit_label(end_label);
+            emit_do_stmt(mw, ctx, body, *loop_body, *condition, None);
         }
         Stmt::For {
             init,
@@ -114,27 +88,7 @@ pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_i
             update,
             body: loop_body,
         } => {
-            if let Some(init) = init {
-                gen_stmt(mw, ctx, body, *init);
-            }
-            let start_label = Label::new();
-            let continue_label = Label::new();
-            let end_label = Label::new();
-            mw.visit_label(start_label);
-            if let Some(condition) = condition {
-                crate::expr_gen::branch::emit_jump_if_false(mw, ctx, body, *condition, end_label);
-            }
-            ctx.continue_labels.push(continue_label);
-            ctx.break_labels.push(end_label);
-            gen_stmt(mw, ctx, body, *loop_body);
-            ctx.break_labels.pop();
-            ctx.continue_labels.pop();
-            mw.visit_label(continue_label);
-            if let Some(update) = update {
-                crate::expr_gen::gen_expr_for_effect(mw, ctx, body, *update);
-            }
-            mw.visit_jump_insn(opcodes::GOTO, start_label);
-            mw.visit_label(end_label);
+            emit_for_stmt(mw, ctx, body, *init, *condition, *update, *loop_body, None);
         }
         Stmt::ForEach {
             var_type,
@@ -142,22 +96,36 @@ pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_i
             iterable,
             body: loop_body,
         } => {
-            emit_array_for_each(mw, ctx, body, var_type, *var_name, *iterable, *loop_body);
+            emit_array_for_each(
+                mw,
+                ctx,
+                body,
+                ArrayForEach {
+                    var_type,
+                    var_name: *var_name,
+                    iterable: *iterable,
+                    loop_body: *loop_body,
+                    label: None,
+                },
+            );
         }
         Stmt::Throw(expr_id) => {
             crate::expr_gen::gen_expr(mw, ctx, body, *expr_id);
             mw.visit_insn(opcodes::ATHROW);
         }
-        Stmt::Break(_) => {
-            if let Some(label) = ctx.break_labels.last() {
-                mw.visit_jump_insn(opcodes::GOTO, *label);
+        Stmt::Break(label) => {
+            if let Some(target) = ctx.find_break_target(*label) {
+                emit_cleanups_to_depth(mw, ctx, body, target.cleanup_depth);
+                mw.visit_jump_insn(opcodes::GOTO, target.label);
             }
         }
-        Stmt::Continue(_) => {
-            if let Some(label) = ctx.continue_labels.last() {
-                mw.visit_jump_insn(opcodes::GOTO, *label);
+        Stmt::Continue(label) => {
+            if let Some(target) = ctx.find_continue_target(*label) {
+                emit_cleanups_to_depth(mw, ctx, body, target.cleanup_depth);
+                mw.visit_jump_insn(opcodes::GOTO, target.label);
             }
         }
+        Stmt::Labeled { label, body: stmt } => emit_labeled_stmt(mw, ctx, body, *label, *stmt),
         Stmt::Switch { selector, cases } => {
             crate::expr_gen::switch::emit_switch_stmt(mw, ctx, body, *selector, cases);
         }
@@ -166,15 +134,190 @@ pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_i
     }
 }
 
+fn emit_labeled_stmt(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    body: &Body,
+    label: ustr::Ustr,
+    stmt_id: StmtId,
+) {
+    match &body.stmts[stmt_id] {
+        Stmt::While {
+            condition,
+            body: loop_body,
+        } => emit_while_stmt(mw, ctx, body, *condition, *loop_body, Some(label)),
+        Stmt::Do {
+            body: loop_body,
+            condition,
+        } => emit_do_stmt(mw, ctx, body, *loop_body, *condition, Some(label)),
+        Stmt::For {
+            init,
+            condition,
+            update,
+            body: loop_body,
+        } => emit_for_stmt(
+            mw,
+            ctx,
+            body,
+            *init,
+            *condition,
+            *update,
+            *loop_body,
+            Some(label),
+        ),
+        Stmt::ForEach {
+            var_type,
+            var_name,
+            iterable,
+            body: loop_body,
+        } => emit_array_for_each(
+            mw,
+            ctx,
+            body,
+            ArrayForEach {
+                var_type,
+                var_name: *var_name,
+                iterable: *iterable,
+                loop_body: *loop_body,
+                label: Some(label),
+            },
+        ),
+        _ => {
+            let end_label = Label::new();
+            let target = ctx.control_target(end_label);
+            ctx.labeled_break_labels.push((label, target));
+            gen_stmt(mw, ctx, body, stmt_id);
+            ctx.labeled_break_labels.pop();
+            mw.visit_label(end_label);
+        }
+    }
+}
+
+fn emit_while_stmt(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    body: &Body,
+    condition: ExprId,
+    loop_body: StmtId,
+    label: Option<ustr::Ustr>,
+) {
+    if is_true_literal(body, condition) && stmt_is_plain_break(body, loop_body) {
+        return;
+    }
+
+    let start_label = Label::new();
+    let end_label = Label::new();
+    mw.visit_label(start_label);
+    crate::expr_gen::branch::emit_jump_if_false(mw, ctx, body, condition, end_label);
+    push_loop_labels(ctx, label, end_label, start_label);
+    gen_stmt(mw, ctx, body, loop_body);
+    pop_loop_labels(ctx, label);
+    if !stmt_definitely_exits(body, loop_body) {
+        mw.visit_jump_insn(opcodes::GOTO, start_label);
+    }
+    mw.visit_label(end_label);
+}
+
+fn emit_do_stmt(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    body: &Body,
+    loop_body: StmtId,
+    condition: ExprId,
+    label: Option<ustr::Ustr>,
+) {
+    if is_false_literal(body, condition) && stmt_is_plain_continue(body, loop_body) {
+        return;
+    }
+
+    let start_label = Label::new();
+    let continue_label = Label::new();
+    let end_label = Label::new();
+    mw.visit_label(start_label);
+    push_loop_labels(ctx, label, end_label, continue_label);
+    gen_stmt(mw, ctx, body, loop_body);
+    pop_loop_labels(ctx, label);
+    mw.visit_label(continue_label);
+    crate::expr_gen::branch::emit_jump_if_true(mw, ctx, body, condition, start_label);
+    mw.visit_label(end_label);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_for_stmt(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    body: &Body,
+    init: Option<StmtId>,
+    condition: Option<ExprId>,
+    update: Option<ExprId>,
+    loop_body: StmtId,
+    label: Option<ustr::Ustr>,
+) {
+    if let Some(init) = init {
+        gen_stmt(mw, ctx, body, init);
+    }
+    let start_label = Label::new();
+    let continue_label = Label::new();
+    let end_label = Label::new();
+    mw.visit_label(start_label);
+    if let Some(condition) = condition {
+        crate::expr_gen::branch::emit_jump_if_false(mw, ctx, body, condition, end_label);
+    }
+    push_loop_labels(ctx, label, end_label, continue_label);
+    gen_stmt(mw, ctx, body, loop_body);
+    pop_loop_labels(ctx, label);
+    mw.visit_label(continue_label);
+    if let Some(update) = update {
+        crate::expr_gen::gen_expr_for_effect(mw, ctx, body, update);
+    }
+    mw.visit_jump_insn(opcodes::GOTO, start_label);
+    mw.visit_label(end_label);
+}
+
+fn push_loop_labels(
+    ctx: &mut CodegenCtx,
+    label: Option<ustr::Ustr>,
+    break_label: Label,
+    continue_label: Label,
+) {
+    let break_target = ctx.control_target(break_label);
+    let continue_target = ctx.control_target(continue_label);
+    ctx.continue_labels.push(continue_target);
+    ctx.break_labels.push(break_target);
+    if let Some(label) = label {
+        ctx.push_labeled_loop(label, break_target, continue_target);
+    }
+}
+
+fn pop_loop_labels(ctx: &mut CodegenCtx, label: Option<ustr::Ustr>) {
+    if label.is_some() {
+        ctx.pop_labeled_loop();
+    }
+    ctx.break_labels.pop();
+    ctx.continue_labels.pop();
+}
+
+struct ArrayForEach<'a> {
+    var_type: &'a Ty,
+    var_name: ustr::Ustr,
+    iterable: ExprId,
+    loop_body: StmtId,
+    label: Option<ustr::Ustr>,
+}
+
 fn emit_array_for_each(
     mw: &mut MethodWriter,
     ctx: &mut CodegenCtx,
     body: &Body,
-    var_type: &Ty,
-    var_name: ustr::Ustr,
-    iterable: ExprId,
-    loop_body: StmtId,
+    for_each: ArrayForEach<'_>,
 ) {
+    let ArrayForEach {
+        var_type,
+        var_name,
+        iterable,
+        loop_body,
+        label,
+    } = for_each;
     let array_ty = crate::expr_gen::expr_ty(ctx, body, iterable);
     let element_ty = match array_ty.erasure() {
         Ty::Array(element) => *element,
@@ -209,11 +352,9 @@ fn emit_array_for_each(
     crate::expr_gen::coerce(mw, &element_ty, var_type);
     mw.visit_var_insn(store_opcode(var_type), var_slot);
 
-    ctx.continue_labels.push(continue_label);
-    ctx.break_labels.push(end_label);
+    push_loop_labels(ctx, label, end_label, continue_label);
     gen_stmt(mw, ctx, body, loop_body);
-    ctx.break_labels.pop();
-    ctx.continue_labels.pop();
+    pop_loop_labels(ctx, label);
 
     mw.visit_label(continue_label);
     mw.visit_iinc_insn(index_slot, 1);
@@ -238,6 +379,10 @@ fn emit_try_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, try_s
         .collect::<Vec<_>>();
     let needs_cleanup = try_stmt.finally.is_some() || !resources.is_empty();
     let finally_handler = needs_cleanup.then(Label::new);
+    let cleanup_scope = needs_cleanup.then(|| CleanupScope {
+        resources: resources.clone(),
+        finally: try_stmt.finally.clone(),
+    });
 
     for (catch, label) in try_stmt.catches.iter().zip(&catch_labels) {
         mw.visit_try_catch_block(
@@ -252,12 +397,20 @@ fn emit_try_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, try_s
     }
 
     mw.visit_label(start_label);
+    if let Some(scope) = cleanup_scope.clone() {
+        ctx.cleanup_scopes.push(scope);
+    }
     for stmt in &try_stmt.body.stmts {
         gen_stmt(mw, ctx, body, *stmt);
     }
+    if cleanup_scope.is_some() {
+        ctx.cleanup_scopes.pop();
+    }
     mw.visit_label(end_label);
-    emit_cleanup(mw, ctx, body, &resources, try_stmt.finally.as_ref());
-    mw.visit_jump_insn(opcodes::GOTO, after_label);
+    if !block_definitely_exits(body, &try_stmt.body) {
+        emit_cleanup(mw, ctx, body, &resources, try_stmt.finally.as_ref());
+        mw.visit_jump_insn(opcodes::GOTO, after_label);
+    }
 
     for (catch, label) in try_stmt.catches.iter().zip(catch_labels) {
         let catch_end = Label::new();
@@ -273,12 +426,20 @@ fn emit_try_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, try_s
             slot,
         );
         mw.visit_var_insn(opcodes::ASTORE, slot);
+        if let Some(scope) = cleanup_scope.clone() {
+            ctx.cleanup_scopes.push(scope);
+        }
         for stmt in &catch.body.stmts {
             gen_stmt(mw, ctx, body, *stmt);
         }
+        if cleanup_scope.is_some() {
+            ctx.cleanup_scopes.pop();
+        }
         mw.visit_label(catch_end);
-        emit_cleanup(mw, ctx, body, &resources, try_stmt.finally.as_ref());
-        mw.visit_jump_insn(opcodes::GOTO, after_label);
+        if !block_definitely_exits(body, &catch.body) {
+            emit_cleanup(mw, ctx, body, &resources, try_stmt.finally.as_ref());
+            mw.visit_jump_insn(opcodes::GOTO, after_label);
+        }
     }
 
     if let Some(handler) = finally_handler {
@@ -334,17 +495,12 @@ fn emit_try_with_resources_only(
     mw.visit_label(after_label);
 }
 
-struct ResourceLocal {
-    ty: Ty,
-    slot: u16,
-}
-
 fn emit_try_resources(
     mw: &mut MethodWriter,
     ctx: &mut CodegenCtx,
     body: &Body,
     resources: &[TryResource],
-) -> Vec<ResourceLocal> {
+) -> Vec<CleanupResource> {
     resources
         .iter()
         .map(|resource| {
@@ -366,7 +522,7 @@ fn emit_try_resources(
                 crate::expr_gen::push_default_value(mw, &resource.ty);
                 mw.visit_var_insn(store_opcode(&resource.ty), slot);
             }
-            ResourceLocal {
+            CleanupResource {
                 ty: resource.ty.clone(),
                 slot,
             }
@@ -378,7 +534,7 @@ fn emit_cleanup(
     mw: &mut MethodWriter,
     ctx: &mut CodegenCtx,
     body: &Body,
-    resources: &[ResourceLocal],
+    resources: &[CleanupResource],
     finally: Option<&Block>,
 ) {
     emit_resource_closes(mw, resources);
@@ -387,13 +543,13 @@ fn emit_cleanup(
     }
 }
 
-fn emit_resource_closes(mw: &mut MethodWriter, resources: &[ResourceLocal]) {
+fn emit_resource_closes(mw: &mut MethodWriter, resources: &[CleanupResource]) {
     for resource in resources.iter().rev() {
         emit_resource_close_if_present(mw, resource);
     }
 }
 
-fn emit_resource_closes_unchecked(mw: &mut MethodWriter, resources: &[ResourceLocal]) {
+fn emit_resource_closes_unchecked(mw: &mut MethodWriter, resources: &[CleanupResource]) {
     for resource in resources.iter().rev() {
         emit_resource_close(mw, resource);
     }
@@ -402,7 +558,7 @@ fn emit_resource_closes_unchecked(mw: &mut MethodWriter, resources: &[ResourceLo
 fn emit_resource_closes_suppressed(
     mw: &mut MethodWriter,
     ctx: &mut CodegenCtx,
-    resources: &[ResourceLocal],
+    resources: &[CleanupResource],
     primary_slot: u16,
 ) {
     let throwable = Ty::Class(ustr::Ustr::from("java/lang/Throwable"));
@@ -440,7 +596,7 @@ fn emit_resource_closes_suppressed(
     }
 }
 
-fn emit_resource_close(mw: &mut MethodWriter, resource: &ResourceLocal) {
+fn emit_resource_close(mw: &mut MethodWriter, resource: &CleanupResource) {
     mw.visit_var_insn(load_opcode(&resource.ty), resource.slot);
     mw.visit_method_insn(
         opcodes::INVOKEVIRTUAL,
@@ -451,7 +607,7 @@ fn emit_resource_close(mw: &mut MethodWriter, resource: &ResourceLocal) {
     );
 }
 
-fn emit_resource_close_if_present(mw: &mut MethodWriter, resource: &ResourceLocal) {
+fn emit_resource_close_if_present(mw: &mut MethodWriter, resource: &CleanupResource) {
     let end_label = Label::new();
     mw.visit_var_insn(load_opcode(&resource.ty), resource.slot);
     mw.visit_jump_insn(opcodes::IFNULL, end_label);
@@ -462,6 +618,26 @@ fn emit_resource_close_if_present(mw: &mut MethodWriter, resource: &ResourceLoca
 fn emit_block(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, block: &Block) {
     for stmt in &block.stmts {
         gen_stmt(mw, ctx, body, *stmt);
+    }
+}
+
+fn emit_abrupt_cleanups(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body) {
+    emit_cleanups_to_depth(mw, ctx, body, 0);
+}
+
+fn emit_cleanups_to_depth(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    body: &Body,
+    target_depth: usize,
+) {
+    let scope_count = ctx.cleanup_scopes.len();
+    for index in (target_depth..scope_count).rev() {
+        let scope = ctx.cleanup_scopes[index].clone();
+        let saved_scopes = ctx.cleanup_scopes.clone();
+        ctx.cleanup_scopes.truncate(index);
+        emit_cleanup(mw, ctx, body, &scope.resources, scope.finally.as_ref());
+        ctx.cleanup_scopes = saved_scopes;
     }
 }
 
@@ -520,6 +696,14 @@ fn return_opcode(ty: &Ty) -> u8 {
     crate::local_var::return_opcode(ty)
 }
 
+fn block_definitely_exits(body: &Body, block: &Block) -> bool {
+    block
+        .stmts
+        .last()
+        .map(|stmt| stmt_definitely_exits(body, *stmt))
+        .unwrap_or(false)
+}
+
 fn stmt_definitely_exits(body: &Body, stmt_id: StmtId) -> bool {
     match &body.stmts[stmt_id] {
         Stmt::Return(_) | Stmt::Throw(_) | Stmt::Break(_) | Stmt::Continue(_) => true,
@@ -533,6 +717,21 @@ fn stmt_definitely_exits(body: &Body, stmt_id: StmtId) -> bool {
             else_branch: Some(else_branch),
             ..
         } => stmt_definitely_exits(body, *then_branch) && stmt_definitely_exits(body, *else_branch),
+        Stmt::Try(try_stmt) => {
+            if try_stmt
+                .finally
+                .as_ref()
+                .is_some_and(|finally| block_definitely_exits(body, finally))
+            {
+                return true;
+            }
+            block_definitely_exits(body, &try_stmt.body)
+                && try_stmt
+                    .catches
+                    .iter()
+                    .all(|catch| block_definitely_exits(body, &catch.body))
+        }
+        Stmt::Labeled { body: stmt, .. } => stmt_definitely_exits(body, *stmt),
         Stmt::Switch { cases, .. } => cases.iter().any(|case| match case {
             SwitchCase::Case { body: stmts, .. } | SwitchCase::Default { body: stmts, .. } => stmts
                 .last()
