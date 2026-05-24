@@ -109,7 +109,14 @@ pub(crate) fn is_cast(p: &Parser) -> bool {
     }
     la.skip_type();
     la.skip_array_dims();
-    la.at(RParen)
+    if !la.at(RParen) {
+        return false;
+    }
+    la.advance();
+    while la.pos < la.tokens.len() && matches!(la.tokens[la.pos].kind, Whitespace | Comment) {
+        la.pos += 1;
+    }
+    !la.at(Arrow)
 }
 
 pub(crate) fn postfix_suffix(p: &mut Parser) {
@@ -166,12 +173,18 @@ pub(crate) fn primary_expr(p: &mut Parser) {
         SwitchKw => {
             stmt::switch_expr(p);
         }
+        LParen if is_lambda_paren(p) => {
+            lambda_expr_from_paren(p);
+        }
         LParen => {
             let m = p.start();
             p.bump();
             expr(p);
             p.expect(RParen);
             m.complete(p, ParenExpr);
+        }
+        Ident if is_ident_lambda(p) => {
+            lambda_expr_from_ident(p);
         }
         Ident => {
             name_expr(p);
@@ -255,4 +268,76 @@ pub(crate) fn expr_list(p: &mut Parser) {
     while p.eat(JavaSyntaxKind::Comma) {
         expr(p);
     }
+}
+
+fn is_lambda_paren(p: &mut Parser) -> bool {
+    use JavaSyntaxKind::*;
+    let mut depth = 1;
+    let mut i = p.pos + 1;
+    loop {
+        if i >= p.tokens.len() {
+            return false;
+        }
+        match p.tokens[i].kind {
+            LParen => depth += 1,
+            RParen => {
+                depth -= 1;
+                if depth == 0 {
+                    i += 1;
+                    while i < p.tokens.len() && matches!(p.tokens[i].kind, Whitespace | Comment) {
+                        i += 1;
+                    }
+                    return i < p.tokens.len() && p.tokens[i].kind == Arrow;
+                }
+            }
+            Whitespace | Comment => {}
+            Arrow => return false,
+            _ => {}
+        }
+        i += 1;
+    }
+}
+
+fn is_ident_lambda(p: &mut Parser) -> bool {
+    use JavaSyntaxKind::*;
+    let mut next = p.pos + 1;
+    while next < p.tokens.len() && matches!(p.tokens[next].kind, Whitespace | Comment) {
+        next += 1;
+    }
+    next < p.tokens.len() && p.tokens[next].kind == Arrow
+}
+
+fn lambda_expr_from_paren(p: &mut Parser) {
+    use JavaSyntaxKind::*;
+    let m = p.start();
+    p.bump();
+    while !p.at(RParen) && p.kind() != Error {
+        let pm = p.start();
+        p.expect(Ident);
+        pm.complete(p, LambdaParam);
+        p.eat(Comma);
+    }
+    p.expect(RParen);
+    p.expect(Arrow);
+    if p.at(LBrace) {
+        stmt::block(p);
+    } else {
+        expr(p);
+    }
+    m.complete(p, LambdaExpr);
+}
+
+fn lambda_expr_from_ident(p: &mut Parser) {
+    use JavaSyntaxKind::*;
+    let m = p.start();
+    let pm = p.start();
+    p.expect(Ident);
+    pm.complete(p, LambdaParam);
+    p.expect(Arrow);
+    if p.at(LBrace) {
+        stmt::block(p);
+    } else {
+        expr(p);
+    }
+    m.complete(p, LambdaExpr);
 }

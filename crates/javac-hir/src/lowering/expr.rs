@@ -67,6 +67,145 @@ impl BodyBuilder {
         self.pattern_names.contains(&name) && self.local_ty(name).is_none()
     }
 
+    pub(super) fn resolve_lambda_target_types(&mut self, method_return_ty: &Ty) {
+        let mut targets: Vec<(ExprId, Ty)> = Vec::new();
+        for (_, stmt) in self.body.stmts.iter() {
+            self.collect_lambda_targets(stmt, method_return_ty, &mut targets);
+        }
+        for (expr_id, ty) in targets {
+            if let Expr::Lambda { target_ty: t, .. } = &mut self.body.exprs[expr_id] {
+                *t = Some(ty);
+            }
+        }
+    }
+
+    fn collect_lambda_targets(
+        &self,
+        stmt: &Stmt,
+        method_return_ty: &Ty,
+        targets: &mut Vec<(ExprId, Ty)>,
+    ) {
+        match stmt {
+            Stmt::LocalVar(decl) => {
+                if let Some(init) = decl.initializer {
+                    self.push_lambda_target(init, &decl.ty, targets);
+                }
+            }
+            Stmt::Return(expr) => {
+                if let Some(expr_id) = expr {
+                    self.push_lambda_target(*expr_id, method_return_ty, targets);
+                }
+            }
+            Stmt::Expr(expr_id) => {
+                self.collect_expr_lambda_targets(*expr_id, targets);
+            }
+            Stmt::Block(block) => {
+                for &s in &block.stmts {
+                    self.collect_lambda_targets(&self.body.stmts[s], method_return_ty, targets);
+                }
+            }
+            Stmt::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.collect_lambda_targets(
+                    &self.body.stmts[*then_branch],
+                    method_return_ty,
+                    targets,
+                );
+                if let Some(eb) = else_branch {
+                    self.collect_lambda_targets(&self.body.stmts[*eb], method_return_ty, targets);
+                }
+            }
+            Stmt::For { body, .. }
+            | Stmt::ForEach { body, .. }
+            | Stmt::While { body, .. }
+            | Stmt::Do { body, .. } => {
+                self.collect_lambda_targets(&self.body.stmts[*body], method_return_ty, targets);
+            }
+            Stmt::Labeled { body, .. } => {
+                self.collect_lambda_targets(&self.body.stmts[*body], method_return_ty, targets);
+            }
+            Stmt::Synchronized(_, block) => {
+                for &s in &block.stmts {
+                    self.collect_lambda_targets(&self.body.stmts[s], method_return_ty, targets);
+                }
+            }
+            Stmt::Try(try_stmt) => {
+                for &s in &try_stmt.body.stmts {
+                    self.collect_lambda_targets(&self.body.stmts[s], method_return_ty, targets);
+                }
+                for catch in &try_stmt.catches {
+                    for &s in &catch.body.stmts {
+                        self.collect_lambda_targets(&self.body.stmts[s], method_return_ty, targets);
+                    }
+                }
+                if let Some(finally) = &try_stmt.finally {
+                    for &s in &finally.stmts {
+                        self.collect_lambda_targets(&self.body.stmts[s], method_return_ty, targets);
+                    }
+                }
+            }
+            Stmt::Switch { cases, .. } => {
+                for case in cases {
+                    let stmts = match case {
+                        SwitchCase::Case { body, .. } | SwitchCase::Default { body, .. } => body,
+                    };
+                    for &s in stmts {
+                        self.collect_lambda_targets(&self.body.stmts[s], method_return_ty, targets);
+                    }
+                }
+            }
+            Stmt::Assert {
+                condition: _,
+                message,
+            } => {
+                if let Some(msg) = message {
+                    self.collect_expr_lambda_targets(*msg, targets);
+                }
+            }
+            Stmt::Throw(expr_id) | Stmt::Yield(expr_id) => {
+                self.collect_expr_lambda_targets(*expr_id, targets);
+            }
+            Stmt::Empty | Stmt::Break(_) | Stmt::Continue(_) => {}
+        }
+    }
+
+    fn collect_expr_lambda_targets(&self, expr_id: ExprId, targets: &mut Vec<(ExprId, Ty)>) {
+        match &self.body.exprs[expr_id] {
+            Expr::Assign { target, value, .. } => {
+                let target_ty = self.expr_ty(*target);
+                self.push_lambda_target(*value, &target_ty, targets);
+            }
+            Expr::MethodCall {
+                target: _,
+                method: _,
+                args: _,
+            } => {}
+            Expr::Parens(inner) => {
+                self.collect_expr_lambda_targets(*inner, targets);
+            }
+            _ => {}
+        }
+    }
+
+    fn push_lambda_target(&self, expr_id: ExprId, target_ty: &Ty, targets: &mut Vec<(ExprId, Ty)>) {
+        let unwrapped = self.unwrap_parens(expr_id);
+        if matches!(self.body.exprs[unwrapped], Expr::Lambda { .. }) {
+            targets.push((unwrapped, target_ty.clone()));
+        }
+    }
+
+    fn unwrap_parens(&self, mut expr_id: ExprId) -> ExprId {
+        loop {
+            match &self.body.exprs[expr_id] {
+                Expr::Parens(inner) => expr_id = *inner,
+                _ => break expr_id,
+            }
+        }
+    }
+
     pub(super) fn pattern_binding(&self, expr_id: ExprId) -> Option<(Ustr, Ty, ExprId)> {
         match &self.body.exprs[expr_id] {
             Expr::Instanceof {
@@ -452,6 +591,31 @@ impl ExprLowerer<'_, '_> {
             }
             JavaSyntaxKind::NewKw => self.parse_new_expr(),
             JavaSyntaxKind::Ident => {
+                let is_lambda = self
+                    .tokens
+                    .get(self.pos + 1)
+                    .is_some_and(|t| t.kind == JavaSyntaxKind::Arrow);
+                if is_lambda {
+                    self.pos += 1;
+                    let name = Ustr::from(token.text.as_str());
+                    self.pos += 1;
+                    self.body.define_local(name, Ty::object());
+                    let body = if self.at_lambda_block() {
+                        self.skip_block_tokens();
+                        LambdaBody::Block(Block { stmts: vec![] })
+                    } else {
+                        LambdaBody::Expr(self.parse_expr()?)
+                    };
+                    let params = vec![LambdaParam {
+                        name,
+                        ty: Some(Ty::object()),
+                    }];
+                    return Ok(self.body.alloc_expr(Expr::Lambda {
+                        params,
+                        body,
+                        target_ty: None,
+                    }));
+                }
                 let name = self.expect_ident()?;
                 let name = Ustr::from(&name);
                 if self.body.pattern_name_is_out_of_scope(name) {
@@ -469,6 +633,32 @@ impl ExprLowerer<'_, '_> {
                         .alloc_expr(Expr::ClassName(Ustr::from(&class_name))));
                 }
                 Ok(self.body.alloc_expr(Expr::Ident(name)))
+            }
+            JavaSyntaxKind::LParen if self.is_lambda_paren() => {
+                self.pos += 1;
+                let mut params = Vec::new();
+                while !self.eat(JavaSyntaxKind::RParen) {
+                    let name = self.expect_ident()?;
+                    let name = Ustr::from(&name);
+                    self.body.define_local(name, Ty::object());
+                    params.push(LambdaParam {
+                        name,
+                        ty: Some(Ty::object()),
+                    });
+                    self.eat(JavaSyntaxKind::Comma);
+                }
+                self.expect(JavaSyntaxKind::Arrow)?;
+                let body = if self.at_lambda_block() {
+                    self.skip_block_tokens();
+                    LambdaBody::Block(Block { stmts: vec![] })
+                } else {
+                    LambdaBody::Expr(self.parse_expr()?)
+                };
+                Ok(self.body.alloc_expr(Expr::Lambda {
+                    params,
+                    body,
+                    target_ty: None,
+                }))
             }
             JavaSyntaxKind::LParen => {
                 self.pos += 1;
@@ -643,12 +833,61 @@ impl ExprLowerer<'_, '_> {
         None
     }
 
+    fn is_lambda_paren(&self) -> bool {
+        let mut depth = 1i32;
+        let mut i = self.pos + 1;
+        loop {
+            if i >= self.tokens.len() {
+                return false;
+            }
+            match self.tokens[i].kind {
+                JavaSyntaxKind::LParen => depth += 1,
+                JavaSyntaxKind::RParen => {
+                    depth -= 1;
+                    if depth == 0 {
+                        i += 1;
+                        while i < self.tokens.len()
+                            && matches!(
+                                self.tokens[i].kind,
+                                JavaSyntaxKind::Whitespace | JavaSyntaxKind::Comment
+                            )
+                        {
+                            i += 1;
+                        }
+                        return i < self.tokens.len()
+                            && self.tokens[i].kind == JavaSyntaxKind::Arrow;
+                    }
+                }
+                JavaSyntaxKind::Arrow => return false,
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+
     fn peek(&self) -> Option<&ExprToken> {
         self.tokens.get(self.pos)
     }
 
     fn peek_kind(&self) -> Option<JavaSyntaxKind> {
         self.peek().map(|token| token.kind)
+    }
+
+    fn at_lambda_block(&self) -> bool {
+        self.peek_kind() == Some(JavaSyntaxKind::LBrace)
+    }
+
+    fn skip_block_tokens(&mut self) {
+        let mut depth = 1;
+        self.pos += 1;
+        while self.pos < self.tokens.len() && depth > 0 {
+            match self.tokens[self.pos].kind {
+                JavaSyntaxKind::LBrace => depth += 1,
+                JavaSyntaxKind::RBrace => depth -= 1,
+                _ => {}
+            }
+            self.pos += 1;
+        }
     }
 
     fn peek_binary_op(&self) -> Option<(BinaryOp, u8)> {
