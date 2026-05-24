@@ -249,6 +249,7 @@ pub enum JavaSyntaxKind {
     PatternExpr,
 
     LambdaExpr,
+    LambdaParam,
     MethodRefExpr,
 
     Annotation,
