@@ -3,6 +3,7 @@ pub struct CompilerConfig {
     pub output_dir: String,
     pub classpath: Vec<String>,
     pub source_files: Vec<String>,
+    pub incremental: bool,
 }
 
 impl CompilerConfig {
@@ -12,6 +13,7 @@ impl CompilerConfig {
             output_dir: ".".to_string(),
             classpath: Vec::new(),
             source_files: Vec::new(),
+            incremental: false,
         }
     }
 }

@@ -1,5 +1,6 @@
 use crate::classpath::build_class_catalog;
 use crate::config::CompilerConfig;
+use crate::incremental::IncrementalBuild;
 use javac_ast::JavaSyntaxNode;
 use javac_bytecode::BytecodeError;
 use javac_call_resolver::ClassCatalog;
@@ -20,6 +21,12 @@ struct ClassArtifact {
     bytes: Vec<u8>,
 }
 
+struct ClassPlan {
+    unit: CompilationUnit,
+    internal_name: String,
+    source_file: String,
+}
+
 impl Compiler {
     pub fn new(config: CompilerConfig) -> Self {
         Self { config }
@@ -27,9 +34,10 @@ impl Compiler {
 
     pub fn compile(self) -> CompileResult<()> {
         let catalog = build_class_catalog(&self.config.classpath, &self.config.source_files)?;
+        let incremental = IncrementalBuild::from_config(&self.config)?;
         let mut errors = Vec::new();
         for source_file in &self.config.source_files {
-            if let Err(error) = self.compile_file(source_file, &catalog) {
+            if let Err(error) = self.compile_file(source_file, &catalog, incremental.as_ref()) {
                 errors.extend(error);
             }
         }
@@ -40,9 +48,21 @@ impl Compiler {
         }
     }
 
-    fn compile_file(&self, source_file: &str, catalog: &ClassCatalog) -> CompileResult<()> {
+    fn compile_file(
+        &self,
+        source_file: &str,
+        catalog: &ClassCatalog,
+        incremental: Option<&IncrementalBuild>,
+    ) -> CompileResult<()> {
         let source = read_source_file(source_file)?;
-        let artifact = compile_source(source_file, &source, catalog)?;
+        let plan = plan_source(source_file, &source, catalog)?;
+        let class_path = class_file_path(&self.config.output_dir, &plan.internal_name);
+
+        if incremental.is_some_and(|incremental| incremental.class_is_fresh(&class_path)) {
+            return Ok(());
+        }
+
+        let artifact = compile_plan(source_file, &source, catalog, plan)?;
         write_class_file(&self.config.output_dir, &artifact)?;
         Ok(())
     }
@@ -52,20 +72,33 @@ fn read_source_file(path: &str) -> CompileResult<String> {
     std::fs::read_to_string(path).map_err(|e| vec![format!("failed to read {}: {}", path, e)])
 }
 
-fn compile_source(
-    filename: &str,
-    source: &str,
-    catalog: &ClassCatalog,
-) -> CompileResult<ClassArtifact> {
+fn plan_source(filename: &str, source: &str, catalog: &ClassCatalog) -> CompileResult<ClassPlan> {
     let unit = parse_and_lower(filename, source, catalog)?;
     let internal_name = top_level_class_name(filename, &unit)?;
     let source_file = source_file_attribute_name(filename);
-    let bytes =
-        javac_bytecode::class_gen::gen_class_with_source_file(&unit, catalog, Some(&source_file))
-            .map_err(|e| render_bytecode_error(filename, source, &e))?;
+
+    Ok(ClassPlan {
+        unit,
+        internal_name,
+        source_file,
+    })
+}
+
+fn compile_plan(
+    filename: &str,
+    source: &str,
+    catalog: &ClassCatalog,
+    plan: ClassPlan,
+) -> CompileResult<ClassArtifact> {
+    let bytes = javac_bytecode::class_gen::gen_class_with_source_file(
+        &plan.unit,
+        catalog,
+        Some(&plan.source_file),
+    )
+    .map_err(|e| render_bytecode_error(filename, source, &e))?;
 
     Ok(ClassArtifact {
-        internal_name,
+        internal_name: plan.internal_name,
         bytes,
     })
 }

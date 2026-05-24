@@ -141,6 +141,8 @@ mod classpath;
 pub mod compiler;
 #[path = "../crates/javac-compiler/src/config.rs"]
 pub mod config;
+#[path = "../crates/javac-compiler/src/incremental.rs"]
+mod incremental;
 #[path = "../crates/javac-compiler/src/pipeline.rs"]
 pub mod pipeline;
 
