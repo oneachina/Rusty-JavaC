@@ -37,6 +37,16 @@ Bytecode Generation
 JVM .class File
 ```
 
+## Use it
+You can use
+```bash
+cargo add rusty-javac
+```
+or add
+```toml
+rusty-javac = "VERSION"
+``` to your cargo.toml
+
 ## Library Goal
 
 Rusty-JavaC is not only intended to be a standalone compiler. One of its long-term goals is to become a reusable Java compiler library for Rust projects.
