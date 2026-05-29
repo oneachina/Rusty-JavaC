@@ -3,79 +3,75 @@
 > [!WARNING]
 > This project is still under heavy development. It is not intended to replace the official Java compiler yet.
 
-This is a project that rewrites the **Java compiler** using **Rust**.
+Rusty-JavaC is a Java compiler written in Rust. It parses Java source, lowers it into an internal representation, resolves types and calls, and writes JVM `.class` files.
 
-## Why?
+## Why
 
-The official Java compiler is written in Java. While this is great for self-hosting, it can be slow and memory-intensive in some cases. Rust provides several advantages for a compiler project:
+The official Java compiler is written in Java. Rusty-JavaC explores a Rust implementation with:
 
-- **Performance**: Rust's zero-cost abstractions and lack of a garbage collector allow for a faster compilation process.
-- **Safety**: Rust's ownership model ensures memory safety and thread safety, reducing bugs in the compiler itself.
-- **Modern Tooling**: Leveraging Cargo and the Rust ecosystem makes it easier to manage dependencies and build cross-platform binaries.
+- explicit ownership and error handling inside the compiler
+- Cargo-based distribution for Rust tooling
+- a reusable library API for Java analysis and bytecode-producing tools
+- room for experiments around diagnostics, incremental compilation, and classpath analysis
 
-## How?
+## Pipeline
 
-Rusty-JavaC is built as a multi-stage compiler pipeline. Each stage is split into a separate crate, making the compiler easier to test, debug, and extend.
+The compiler is one Cargo package with stages split into modules under `src/`:
 
 ```text
 Java source
-   ↓
-Lexer
-   ↓
-Parser
-   ↓
-AST / Syntax Tree
-   ↓
-HIR Lowering
-   ↓
-Type Analysis
-   ↓
-Call Resolution
-   ↓
-Bytecode Generation
-   ↓
-JVM .class File
+  -> lexer
+  -> parser
+  -> ast
+  -> hir lowering
+  -> type and call resolution
+  -> bytecode generation
+  -> JVM .class file
 ```
 
-## Use it
-You can use
+## Use It
+
+As a library:
+
 ```bash
 cargo add rusty-javac
 ```
-or add
+
+Or in `Cargo.toml`:
+
 ```toml
 rusty-javac = "VERSION"
 ```
-to your cargo.toml
 
-## Library Goal
+As the example compiler:
 
-Rusty-JavaC is not only intended to be a standalone compiler. One of its long-term goals is to become a reusable Java compiler library for Rust projects.
-
-In the future, Rusty-JavaC aims to provide stable APIs for tools such as Java analyzers, IDE plugins, code transformation tools, and custom Java-related compilers.
+```bash
+cargo run --example compiler-example -- --output-dir target/classes tests/java/HelloWorld.java
+```
 
 ## Build
 
 Requirements:
 
-- **Rust** environment
-- **Cargo**
+- Rust 1.85+
+- Java 21+ for fixture comparison, `javap`, and JVM verification
 
 ```bash
 git clone https://github.com/Eatgrapes/Rusty-JavaC.git
-
 cd Rusty-JavaC
-
-cargo build
+cargo build --locked
+cargo test --locked
 ```
+
+## Status
+
+The compiler already handles a growing subset of Java syntax, bytecode generation, classpath/source lookup, package output, lambda lowering, anonymous classes, and platform class signatures.
+
+Large parts of Java are still incomplete. See [TODO.md](TODO.md) for the current backlog.
 
 ## Contributing
 
-This project is still young, and many parts of the compiler need improvement.
-
-Contributions are welcome. You can help by improving the parser, adding Java syntax support, fixing lowering bugs, improving type analysis, working on bytecode generation, writing tests, or improving documentation.
-
-If you are interested in compiler development, Java internals, JVM bytecode, or Rust, PRs are welcome.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR. Good contributions usually include a focused Java fixture, verifier coverage when applicable, and a commit message following Conventional Commits.
 
 ## License
 

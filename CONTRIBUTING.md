@@ -1,121 +1,121 @@
 # Contributing to Rusty-JavaC
 
-Rusty-JavaC is still early-stage. Focused fixes, tests, docs, and compiler feature work are all useful.
+Rusty-JavaC is an early-stage Java compiler written in Rust. Treat every change as compiler work: keep it small, test the generated class files, and leave the code easier to understand than you found it.
 
-## Getting Started
+## Setup
 
-### Prerequisites
+Required tools:
 
 - Rust 1.85+ with Cargo
-- Java 21+ for `javap` and JVM verification
+- Java 21+ for `javac`, `javap`, and JVM verification
 - Git
 
-### Building
+Build and run the Rust tests:
 
 ```bash
-git clone https://github.com/Eatgrapes/Rusty-JavaC.git
-cd Rusty-JavaC
-cargo build --workspace
+cargo build --locked
+cargo test --locked
 ```
 
-### Running Tests
+For bytecode, lowering, or type changes, also compile at least one Java fixture and inspect the generated class:
 
 ```bash
-cargo test --workspace
-```
-
-For parser or bytecode changes, also run the compiler example and inspect the generated class:
-
-```bash
-cargo run --example compiler-example -- --output-dir target/test-output tests/java/HelloWorld.java
+cargo run --locked --example compiler-example -- --output-dir target/test-output tests/java/HelloWorld.java
 javap -v -c target/test-output/HelloWorld.class
+java -Xverify:all -cp target/test-output HelloWorld
 ```
 
-## Project Structure
+## Project Layout
 
-Rusty-JavaC is a single Cargo package. Compiler stages live as regular Rust modules under `src/`:
+The project is a single Cargo package. Compiler stages are regular Rust modules under `src/`:
 
 ```text
 src/
-|- ast           # Syntax node kinds and CST helpers
-|- lexer         # Tokenizer built on logos
-|- parser        # Recursive-descent parser to CST
-|- hir           # High-level IR and lowering from CST
-|- ty            # Type model, descriptors, and assignability checks
-|- call_resolver # Class catalog and method/constructor resolution
-|- bytecode      # JVM bytecode generation and validation
-|- classfile     # .class binary reader/writer helpers
-|- diagnostics   # Error rendering
+|- ast           # Syntax node wrappers over the parsed tree
+|- lexer         # Tokenization and Unicode escape handling
+|- parser        # Recursive-descent parser
+|- hir           # High-level IR, lowering, and expression inference
+|- ty            # Java type model, descriptors, and assignability
+|- call_resolver # Class catalog and method/constructor lookup
+|- bytecode      # JVM bytecode generation and bytecode validation
+|- classfile     # .class reading and writing helpers
+|- diagnostics   # User-facing diagnostic rendering
 `- compiler      # Classpath, incremental state, and compile pipeline
 ```
 
-The rough data flow is:
+The compile path is:
 
 ```text
-lexer -> parser -> ast -> hir -> ty -> call_resolver -> bytecode -> classfile
-                                      \-> diagnostics
+Java source
+  -> lexer
+  -> parser
+  -> ast
+  -> hir lowering
+  -> type and call resolution
+  -> bytecode generation
+  -> classfile writer
 ```
 
-`src/lib.rs` only declares the top-level modules and re-exports `CompilerConfig` plus `compile()`.
+`src/lib.rs` should stay small. Add new implementation inside the stage that owns it, then expose only the API that other stages need.
 
-There is also:
+## Change Guidelines
 
-- `examples/compiler-example.rs`: a minimal CLI showing library usage.
-- `tests/java/`: Java source fixtures used for integration checks.
+Keep compiler behavior and structure separate:
 
-## What To Work On
+- Parser code should describe syntax, not Java semantics.
+- Lowering should translate syntax into HIR and preserve useful source spans.
+- Type inference and call resolution should avoid hardcoded one-off cases when the class catalog can answer the question.
+- Bytecode generation should consume typed/resolved HIR instead of re-parsing syntax decisions.
+- Diagnostics should report the real source span and explain the fix when the compiler knows one.
 
-- Parser coverage: Java syntax is still incomplete.
-- HIR lowering: many Java constructs need more complete lowering.
-- Type analysis: inference and checking need more cases.
-- Bytecode generation: exceptions, control flow edges, and JVM metadata need care.
-- Diagnostics: better messages, recovery, and suggestions.
-- Tests: focused `.java` fixtures in `tests/java/`.
+Prefer small modules with clear ownership. If a file grows because it handles several independent concepts, split by concept rather than by arbitrary line count.
 
-## Development Workflow
+Do not add tests that only assert exact pretty-printed diagnostic text unless the output is intentionally stable. Prefer Java fixtures, JVM verification, `javap` inspection, or snapshot tests for rendered diagnostics.
 
-1. Create a branch from `master`.
-2. Keep changes focused.
-3. Run `cargo fmt --all`.
-4. Run `cargo clippy --workspace --all-targets --all-features -- -D warnings`.
-5. Run `cargo test --workspace`.
-6. For bytecode changes, compile relevant Java fixtures and inspect with `javap`.
+## Java Fixtures
 
-## Code Style
+Put integration fixtures under `tests/java/`. A good fixture:
 
-Use default `rustfmt`. Keep modules cohesive and prefer explicit module paths over broad root re-exports. Public items should have docs when behavior is not obvious.
+- compiles with `javac`
+- exercises one compiler capability or one known edge case
+- can be verified with `java -Xverify:all` when it has a runnable `main`
+- avoids unrelated language features that make failures harder to diagnose
 
-Return `Result` for recoverable failures. Use `thiserror` for error types when adding new compiler errors.
+When changing bytecode output, compare against `javac` when practical. Exact bytecode does not need to match, but verifier behavior and runtime behavior should.
 
-## Commit Messages
+## Checklist Before Commit
 
-Use [Conventional Commits](https://www.conventionalcommits.org/):
+Run the narrowest useful checks first, then the full set before committing:
+
+```bash
+cargo fmt --all
+cargo check --workspace --all-targets --locked
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo test --workspace --locked
+```
+
+For compiler changes, also compile the affected fixtures:
+
+```bash
+cargo run --locked --example compiler-example -- --output-dir target/java-fixtures-rusty tests/java/HelloWorld.java
+javap -v -c target/java-fixtures-rusty/HelloWorld.class
+```
+
+## Commits
+
+Use Conventional Commits:
 
 ```text
 type(scope): short description
 ```
 
-Common types:
+Common types are `feat`, `fix`, `refactor`, `docs`, `test`, `ci`, and `chore`. Useful scopes are module names such as `parser`, `hir`, `bytecode`, `compiler`, `diagnostics`, and `classfile`.
 
-| Type | When to use |
-|------|-------------|
-| `feat` | New capability |
-| `fix` | Bug fix |
-| `refactor` | Structure change without intended behavior change |
-| `docs` | Documentation only |
-| `style` | Formatting or whitespace |
-| `ci` | Workflow changes |
-| `test` | Test changes |
+Keep commits focused. If a feature needs parser, lowering, bytecode, and tests, split it into reviewable commits when possible.
 
-Good scopes are module names such as `compiler`, `hir`, `parser`, `bytecode`, and `classfile`.
+## Roadmap
 
-## Adding Java Fixtures
-
-Put `.java` files under `tests/java/`. They should compile with `javac` and focus on a feature or edge case.
-
-## CI
-
-`.github/workflows/build.yml` builds the package, runs tests, compiles a Java file end-to-end, and verifies the generated class on the JVM.
+Use [TODO.md](TODO.md) as the working backlog. If a PR finishes an item, update the checkbox in the same PR.
 
 ## License
 
