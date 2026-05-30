@@ -42,12 +42,6 @@ Or in `Cargo.toml`:
 rusty-javac = "VERSION"
 ```
 
-As the example compiler:
-
-```bash
-cargo run --example compiler-example -- --output-dir target/classes tests/java/HelloWorld.java
-```
-
 ## Build
 
 Requirements:
