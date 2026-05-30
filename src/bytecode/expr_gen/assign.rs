@@ -175,6 +175,9 @@ fn emit_known_assign(
             } else if ctx.field_is_static(name) {
                 emit_static_field_assign(mw, ctx, request, name);
                 true
+            } else if matches!(request.op, AssignOp::Plain) && ctx.field_is_instance(name) {
+                emit_instance_field_assign(mw, ctx, request, name);
+                true
             } else {
                 false
             }

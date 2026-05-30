@@ -174,6 +174,12 @@ impl<'a> CodegenCtx<'a> {
             .is_some_and(|field| field.access_flags & crate::classfile::ACC_STATIC != 0)
     }
 
+    pub fn field_is_instance(&self, name: Ustr) -> bool {
+        self.fields
+            .get(&name)
+            .is_some_and(|field| field.access_flags & crate::classfile::ACC_STATIC == 0)
+    }
+
     pub fn method_sig(&self, name: Ustr) -> Option<MethodSig> {
         self.methods.get(&name).cloned()
     }
